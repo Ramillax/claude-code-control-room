@@ -52,15 +52,27 @@ The deployment this was extracted from ran behind several protections. They were
 - Delete works **only inside `uploads/` and `outbox/`**. It's never recursive and always goes through a POST (link prefetchers can't trigger it).
 - Uploaded paths and dictated text are typed into the prompt **without Enter**, so nothing runs until you review it.
 
-### The fastest safe way to use it remotely
+### How to use it from other devices
+
+**Recommended: your own subdomain, behind a login.** This is how the original setup runs every day, and the only way that's comfortable from a phone: open `https://panel.yourdomain.com` from any device and you get the full grid.
+
+1. Keep the server on `127.0.0.1` (the default). Never expose the port itself.
+2. Put a reverse proxy or tunnel in front that provides **HTTPS + a login**, ideally with a second factor:
+   - **Cloudflare Tunnel + Cloudflare Access**: no open ports at all; allow only your own email.
+   - **Tailscale**: the panel is reachable only from your own devices, on your private network.
+   - **Your own reverse proxy** (Caddy, Traefik, nginx) + an SSO layer (oauth2-proxy, Authelia, Pomerium) with 2FA, and a firewall so the server only accepts connections from that proxy.
+3. If you use a `Permissions-Policy` header, allow `microphone=(self)` for the 🎤 button to work.
+
+⚠ A subdomain **without** a login in front is an open shell on your server: bots scan subdomains constantly. The login is not optional.
+
+**Quick way to try it: an SSH tunnel.** Nothing to configure: it reuses the SSH access you already have.
 
 ```bash
-# on your laptop/phone-with-a-terminal: tunnel the port over SSH, nothing gets exposed
-ssh -L 7680:127.0.0.1:7680 you@your-server
-# then open http://127.0.0.1:7680
+ssh -L 7680:127.0.0.1:7680 you@your-server    # keep this open
+# then open http://127.0.0.1:7680 in your browser
 ```
 
-For a phone without SSH, use a zero-trust proxy (Tailscale, Cloudflare Tunnel + Access…). **Never** port-forward it raw to the internet.
+You get **the same full web UI** (the grid, all the buttons), not a plain terminal: SSH only carries the traffic, encrypted. It's great from a laptop, awkward from a phone, which is why the subdomain is the everyday option.
 
 ---
 
