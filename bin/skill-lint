@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+skill-lint — check Claude Code skills for the problems that creep in when several sessions
+maintain them in parallel.
+
+    skill-lint                      lint ./.claude/skills and ~/.claude/skills
+    skill-lint path/to/skills ...   lint specific skills folders (or single skill folders)
+
+Errors (exit 1):
+  · SKILL.md frontmatter lacks `name:` / `description:` (the skill won't load properly)
+  · duplicate changelog ids (`**#NNN**` used twice): two sessions read the same max id
+Warnings:
+  · SKILL.md over 12 KB (the router is loaded in full on every trigger; move detail to references/)
+  · `references/x.md` mentioned but missing in every skill (a dead pointer sends the next
+    session nowhere). Changelogs are skipped: history may name files that no longer exist.
+  · the same `## YYYY-MM-DD` heading twice in a changelog, or days out of order (newest must be on top)
+  · frontmatter `name:` different from the folder name
+"""
+import os, re, sys
+
+ROUTER_MAX = 12 * 1024
+REF_RE = re.compile(r"(?:(?<![\w/-])([a-z0-9][a-z0-9-]*)/)?references/([\w.\-/]+?\.md)\b")
+ID_RE = re.compile(r"^\*\*#(\d+)\*\*", re.M)
+DAY_RE = re.compile(r"^## (\d{4}-\d{2}-\d{2})\s*$", re.M)
+
+errors, warnings = [], []
+
+
+def frontmatter(text):
+    m = re.match(r"^---\n(.*?)\n---", text, re.S)
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).splitlines():
+        if ":" in line and not line.startswith(" "):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def skill_dirs(root):
+    if os.path.isfile(os.path.join(root, "SKILL.md")):
+        return [root]
+    try:
+        return sorted(os.path.join(root, d) for d in os.listdir(root)
+                      if os.path.isdir(os.path.join(root, d)) and not d.startswith((".", "_")))
+    except OSError:
+        return []
+
+
+def lint_skill(path, all_roots):
+    name = os.path.basename(path.rstrip("/"))
+    sk = os.path.join(path, "SKILL.md")
+    if not os.path.isfile(sk):
+        warnings.append(f"{name}: folder without SKILL.md (Claude Code ignores it)")
+        return
+    text = open(sk, encoding="utf-8", errors="replace").read()
+    fm = frontmatter(text)
+    for key in ("name", "description"):
+        if not fm.get(key):
+            errors.append(f"{name}: SKILL.md frontmatter has no `{key}:`")
+    if fm.get("name") and fm["name"] != name:
+        warnings.append(f"{name}: frontmatter name is `{fm['name']}` (folder is `{name}`)")
+    size = os.path.getsize(sk)
+    if size > ROUTER_MAX:
+        warnings.append(f"{name}: SKILL.md is {size/1024:.1f} KB (> 12 KB) — move detail into references/")
+
+    # dead pointers, from the router and from every reference
+    files = [sk] + [os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(path, "references"))
+                    for f in fs if f.endswith(".md")]
+    for f in files:
+        if os.path.basename(f).startswith("changelog"):
+            continue                                      # history may name files that no longer exist
+        body = open(f, encoding="utf-8", errors="replace").read()
+        for other, ref in set(REF_RE.findall(body)):
+            if "<" in ref or "*" in ref:
+                continue                                  # a placeholder like references/<topic>.md
+            if other and other != name:
+                cands = [os.path.join(r, other, "references", ref) for r in all_roots]
+            else:
+                # unprefixed: this skill's references, or another skill's (prose often
+                # says "see references/x.md in the other skill" without a prefix)
+                cands = [os.path.join(path, "references", ref)] + [
+                    os.path.join(r, d, "references", ref) for r in all_roots
+                    for d in (os.listdir(r) if os.path.isdir(r) else [])]
+            if not any(os.path.isfile(c) for c in cands):
+                warnings.append(f"{name}: {os.path.relpath(f, path)} points to missing "
+                                f"{(other + '/') if other else ''}references/{ref}")
+
+    # changelog hygiene
+    for f in files:
+        if not os.path.basename(f).startswith("changelog"):
+            continue
+        body = open(f, encoding="utf-8", errors="replace").read()
+        seen = {}
+        for i in ID_RE.findall(body):
+            seen[i] = seen.get(i, 0) + 1
+        dups = sorted((int(i) for i, n in seen.items() if n > 1))
+        if dups:
+            errors.append(f"{name}: {os.path.basename(f)} has duplicate ids: "
+                          + ", ".join(f"#{d}" for d in dups)
+                          + " — renumber the less-cited one (grep -rn '#NNN') and fix its citations")
+        days = DAY_RE.findall(body)
+        dd = sorted({d for d in days if days.count(d) > 1})
+        if dd:
+            warnings.append(f"{name}: {os.path.basename(f)} repeats day headings: {', '.join(dd)}")
+        if days != sorted(days, reverse=True):
+            warnings.append(f"{name}: {os.path.basename(f)} days are not newest-first")
+
+
+def main():
+    roots = sys.argv[1:] or [p for p in (os.path.join(os.getcwd(), ".claude", "skills"),
+                                         os.path.expanduser("~/.claude/skills")) if os.path.isdir(p)]
+    if not roots:
+        print("no skills folder found (looked in ./.claude/skills and ~/.claude/skills)")
+        return 0
+    roots = [os.path.abspath(r) for r in roots]
+    parents = [r if not os.path.isfile(os.path.join(r, "SKILL.md")) else os.path.dirname(r) for r in roots]
+    count = 0
+    for r in roots:
+        for d in skill_dirs(r):
+            lint_skill(d, parents)
+            count += 1
+    for e in errors:
+        print("✗", e)
+    for w in warnings:
+        print("⚠", w)
+    print(f"{count} skill(s) checked · {len(errors)} error(s) · {len(warnings)} warning(s)")
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

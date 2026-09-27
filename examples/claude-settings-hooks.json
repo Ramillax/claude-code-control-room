@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "PreToolUse":       [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "PostToolUse":      [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "Notification":     [{ "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py" }] }]
+  }
+}

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# skill-new — scaffold a Claude Code skill with the 3-layer structure (router / references / changelog).
+#
+#   skill-new myapp-backend                 → ./.claude/skills/myapp-backend   (project skill)
+#   skill-new myapp-backend --personal      → ~/.claude/skills/myapp-backend   (all your projects)
+#   skill-new myapp-backend --dir <path>    → <path>/myapp-backend              (any skills folder)
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+NAME="${1:?usage: skill-new <name> [--personal | --dir <skills-folder>]}"
+[[ "$NAME" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || { echo "name must be lowercase letters, digits and dashes" >&2; exit 1; }
+case "${2:-}" in
+  --personal) BASE="$HOME/.claude/skills";;
+  --dir)      BASE="${3:?--dir needs a path}";;
+  "")         BASE="$PWD/.claude/skills";;
+  *)          echo "unknown option: $2" >&2; exit 1;;
+esac
+DEST="$BASE/$NAME"
+[ -e "$DEST" ] && { echo "already exists: $DEST" >&2; exit 1; }
+mkdir -p "$BASE"
+cp -r "$HERE/skills/_template" "$DEST"
+TITLE=$(echo "$NAME" | sed 's/-/ /g')
+TODAY=$(date +%F)
+sed -i "s/__NAME__/$NAME/g; s/__TITLE__/$TITLE/g" "$DEST/SKILL.md"
+sed -i "s/YYYY-MM-DD/$TODAY/g" "$DEST/references/changelog.md"
+echo "✅ created $DEST"
+echo "   next: write a specific 'description' in SKILL.md (it decides when the skill loads),"
+echo "         then describe the system in references/overview.md"

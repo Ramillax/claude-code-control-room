@@ -1,0 +1,14 @@
+# ~/.config/systemd/user/controlroom-web.service
+[Unit]
+Description=controlroom: web UI + /tty proxy
+After=controlroom-ttyd.service
+
+[Service]
+EnvironmentFile=-%h/claude-code-control-room/controlroom.env
+Environment=CR_TTYD_SOCKET=%h/.local/state/controlroom/ttyd.sock
+ExecStart=/usr/bin/python3 %h/claude-code-control-room/server/server.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

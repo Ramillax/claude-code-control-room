@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# cr-session — what ttyd runs for every terminal tile in the control room.
+#
+# ttyd is started with `-a`, so the tile's URL `?arg=<name>` arrives here as $1. We only
+# accept names from the CR_SESSIONS allowlist: the value is never evaluated by a shell
+# (it is an exec argument) and anything not listed is rejected.
+#
+# `tmux new-session -A` attaches if the session exists and creates it otherwise, so closing
+# the browser only DETACHES — Claude keeps running inside tmux.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+[ -f "${CR_CONFIG:-$HERE/controlroom.env}" ] && . "${CR_CONFIG:-$HERE/controlroom.env}"
+
+SESSIONS="${CR_SESSIONS:-claude1 claude2 claude3 claude4 shell}"
+SHELL_SESSIONS="${CR_SHELL_SESSIONS:-shell}"          # these get a plain shell, not Claude
+WORKDIR="${CR_WORKDIR:-$HOME}"
+CLAUDE_CMD="${CR_CLAUDE_CMD:-claude --resume}"      # --resume opens the picker to continue a chat
+TMUX_ARGS=(); [ -n "${CR_TMUX_SOCKET:-}" ] && TMUX_ARGS=(-L "$CR_TMUX_SOCKET")
+
+s="${1:-}"
+ok=0; for x in $SESSIONS; do [ "$x" = "$s" ] && ok=1; done
+if [ "$ok" != 1 ]; then printf 'Session not allowed: %q (see CR_SESSIONS)\n' "$s"; sleep 2; exit 1; fi
+
+# Optional: make Claude sessions the kernel's preferred OOM victim (recoverable with --resume)
+# instead of whatever else runs on the box. Only raising is allowed without root.
+oom=""; [ -n "${CR_OOM_SCORE_ADJ:-}" ] && oom="echo ${CR_OOM_SCORE_ADJ} > /proc/self/oom_score_adj 2>/dev/null; "
+
+is_shell=0; for x in $SHELL_SESSIONS; do [ "$x" = "$s" ] && is_shell=1; done
+if [ "$is_shell" = 1 ]; then startcmd="${oom}exec bash -l"
+else                         startcmd="${oom}${CLAUDE_CMD}; exec bash -l"   # leaving Claude drops you to a shell in WORKDIR
+fi
+
+# The start command only runs when the session is CREATED; attaching to a live one ignores it.
+# Export the board location so `slog` in every session writes to the same file the UI reads.
+exec tmux "${TMUX_ARGS[@]}" new-session -A -s "$s" -c "$WORKDIR" \
+  -e "SLOG_BOARD=${SLOG_BOARD:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom/SESSIONS.md}" \
+  -e "CR_OUTBOX=${CR_OUTBOX:-${CR_DATA_DIR:-$WORKDIR/.controlroom}/outbox}" \
+  -e "CR_STATE_DIR=${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}" \
+  bash -lc "$startcmd"

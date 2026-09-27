@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Claude Code Control Room</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel2:#161b27; --border:#222a3a;
+    --fg:#cdd6f4; --muted:#7c89a8; --accent:#d97757; --ok:#3ddc97; --bad:#e5484d; --idle:#8ab4ff;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    height:100dvh;                                /* dvh = the real viewport on mobile (address bar) */
+    background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    display:flex; flex-direction:column; overflow:hidden; -webkit-text-size-adjust:100%;
+  }
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);
+         border-bottom:1px solid var(--border);flex:0 0 auto}
+  header .brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:.2px}
+  header .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  header .spacer{flex:1}
+  .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{background:var(--panel2);color:var(--muted);border:0;padding:6px 11px;font:inherit;cursor:pointer;
+              border-right:1px solid var(--border)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#1a1208;font-weight:600}
+  .seg button:hover:not(.on){color:var(--fg)}
+  .hint{color:var(--muted);font-size:12px}
+  .hint kbd{background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+
+  /* Top-bar badges: sessions waiting for YOUR permission. Tap one to jump to it. */
+  .notif button{display:flex;align-items:center;gap:6px;color:var(--fg);font-weight:600}
+  .notif button:hover{background:var(--panel);color:var(--fg)}
+  .notif .pin{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 7px var(--bad);animation:pulse 1.1s ease-in-out infinite}
+
+  main{flex:1;display:grid;gap:8px;padding:8px;min-height:0}
+  main[data-cols="1"]{grid-template-columns:1fr}
+  main[data-cols="2"]{grid-template-columns:1fr 1fr}
+  main[data-cols="3"]{grid-template-columns:1fr 1fr 1fr}
+
+  .tile{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel);
+        border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .tile.focus{border-color:var(--accent)}
+  .tbar{display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--panel2);
+        border-bottom:1px solid var(--border);flex:0 0 auto;min-width:0}
+  .tbar select{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;
+               padding:3px 6px;font:inherit;cursor:pointer}
+  .tbar .tspacer{flex:1}
+  .tbar button{background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;
+               padding:3px 8px;font:inherit;cursor:pointer}
+  .tbar button:hover{color:var(--fg);border-color:var(--muted)}
+  /* State dot, fed by the Claude Code hook through /api/status */
+  .st{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#3a4256}
+  .st[data-s="working"]{background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 1.4s ease-in-out infinite}
+  .st[data-s="blocked"]{background:var(--bad);box-shadow:0 0 7px var(--bad);animation:pulse .8s ease-in-out infinite}
+  .st[data-s="idle"]{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+  .st[data-s="shell"]{background:var(--idle)}
+  .st[data-s="unknown"]{background:#5b6479}
+  /* Locks this session holds on the slog board */
+  .locks{display:flex;gap:4px;min-width:0;overflow:hidden}
+  .lk{font-size:11px;color:#f2c98a;background:#2a2116;border:1px solid #4a3a22;border-radius:5px;
+      padding:1px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  .tile iframe{flex:1;width:100%;border:0;background:#0b0e14}
+  .tile.full{position:fixed;inset:0;z-index:50;border-radius:0}
+
+  /* --- Mobile: same tiles, STACKED in one scrolling column --- */
+  @media (max-width:760px){
+    header{padding:7px 10px;gap:8px;flex-wrap:wrap}
+    header .hint{display:none}
+    header #tools{display:none}                   /* on mobile they live in the key bar */
+    .seg button{padding:8px 13px}
+    main{grid-template-columns:1fr!important;grid-auto-rows:minmax(80dvh,1fr);gap:6px;padding:6px;
+         overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .tbar{gap:6px;padding:5px 6px}
+    .tbar select{padding:8px 6px;font-size:16px;flex:1 1 60px;min-width:0}   /* 16px avoids iOS zoom-on-focus */
+    .tbar button{padding:8px 10px;font-size:18px;flex:0 0 auto}
+    .locks{display:none}
+  }
+
+  /* --- Key bar: keys a phone keyboard doesn't have. Fixed at the bottom, sends to the ACTIVE tile. --- */
+  #keybar{display:none;align-items:center;flex-wrap:wrap;gap:6px;position:fixed;left:0;right:0;bottom:0;z-index:60;
+          padding:7px 8px calc(7px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--border)}
+  #keybar .kchip{flex:0 0 auto;display:flex;align-items:center;gap:5px;height:44px;padding:0 11px;background:var(--panel2);
+                 color:var(--muted);border:1px solid var(--border);border-radius:9px;font:inherit;font-size:13px;cursor:pointer;
+                 white-space:nowrap;-webkit-user-select:none;user-select:none}
+  #keybar .kchip b{color:var(--accent)}
+  #keybar .kchip .caret{font-size:10px;color:var(--muted)}
+  #winmenu{position:fixed;left:8px;bottom:calc(62px + env(safe-area-inset-bottom));z-index:61;background:var(--panel2);
+           border:1px solid var(--border);border-radius:10px;padding:6px;min-width:150px;max-height:55dvh;overflow-y:auto;
+           box-shadow:0 10px 34px rgba(0,0,0,.55)}
+  #winmenu .wtitle{color:var(--muted);font-size:11px;padding:4px 8px 6px}
+  #winmenu button{display:block;width:100%;min-width:0;height:auto;text-align:left;margin:2px 0;background:transparent;
+                  color:var(--fg);border:1px solid transparent;border-radius:7px;padding:11px 12px;font:inherit;font-size:15px;cursor:pointer}
+  #winmenu button.cur{color:var(--accent);background:var(--panel);border-color:var(--border)}
+  #keybar button{flex:0 0 auto;min-width:44px;height:44px;padding:0 13px;background:var(--panel2);color:var(--fg);
+                 border:1px solid var(--border);border-radius:9px;font:600 17px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+                 cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+  #keybar button.stop{color:var(--accent)}
+  #keybar button.pressed{background:var(--accent);color:#1a1208;border-color:var(--accent)}
+  /* data-confirm: first tap ARMS (blinking ring), second tap within 2 s fires */
+  #keybar button.armed{color:var(--accent);border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);animation:pulse .8s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.45}}
+  #keybar button.rec, header #tools button.rec{background:#c9372c;color:#fff;border-color:#c9372c;animation:pulse .9s ease-in-out infinite}
+  .nostt [data-act="mic"], .nostt #micbtn{display:none!important}
+
+  /* Green dot on 📋: there is a NEW clip you haven't copied yet */
+  #clipbtn, #keybar button[data-act="clip"]{position:relative}
+  #clipbtn.newclip::after, #keybar button[data-act="clip"].newclip::after{content:"";position:absolute;top:4px;right:4px;
+    width:7px;height:7px;border-radius:50%;background:#3fd35f;box-shadow:0 0 0 1.5px rgba(0,0,0,.55)}
+
+  /* --- Dialogs --- */
+  .ov{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;background:rgba(4,6,10,.62);padding:14px}
+  .ov[hidden]{display:none}
+  .box{width:min(480px,100%);max-height:88dvh;overflow-y:auto;background:var(--panel);border:1px solid var(--border);
+       border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.6);padding:14px}
+  .box.wide{width:min(620px,100%)}
+  .box h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .box h3 .x{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;
+             padding:4px 10px;font:inherit;cursor:pointer}
+  #upbox label{display:flex;align-items:center;gap:8px;margin:8px 0;color:var(--muted);font-size:13px}
+  #upbox select{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font:inherit}
+  #upbox input[type=file]{width:100%;margin:8px 0;padding:12px 10px;color:var(--muted);font:inherit;background:var(--bg);
+                          border:1px dashed var(--border);border-radius:8px}
+  #upbox input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+  #uppreview{display:block;max-width:100%;max-height:170px;margin:2px 0 8px;object-fit:contain;background:var(--bg);
+             border:1px solid var(--border);border-radius:8px}
+  #uppreview[hidden]{display:none}
+  #uptip{margin:0 0 2px;color:var(--muted);font-size:11.5px}
+  #upbox .send{width:100%;margin-top:8px;padding:11px;background:var(--accent);color:#1a1208;border:0;border-radius:8px;
+               font:600 14px/1 ui-monospace,Menlo,monospace;cursor:pointer}
+  #upbox .send:disabled{opacity:.55;cursor:default}
+  #upres{width:100%;height:0;border:0;border-radius:8px;background:var(--bg);transition:height .15s}
+  #upres.show{height:190px;margin-top:10px;border:1px solid var(--border)}
+  .tile.drop{border-color:var(--ok);box-shadow:0 0 0 2px var(--ok) inset}
+  #dlframe{width:100%;height:min(62dvh,440px);border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+  #stframe{width:100%;height:170px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+  /* Board dialog: slog locks + feed */
+  #bdbody h4{margin:12px 0 6px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  #bdbody h4:first-child{margin-top:0}
+  .brow{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #1b2231;font-size:12.5px}
+  .brow:last-child{border-bottom:0}
+  .brow .t{color:var(--muted);white-space:nowrap}
+  .brow .w{color:var(--accent);white-space:nowrap}
+  .brow .m{flex:1;min-width:0;overflow-wrap:anywhere}
+  .brow .stale{color:var(--bad)}
+  .empty{color:var(--muted);font-size:12.5px}
+
+  @media (max-width:760px){ #keybar{display:flex} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span> Claude Code Control Room</div>
+  <div class="seg" id="layout">
+    <button data-n="1">1</button><button data-n="2">2</button><button data-n="4">4</button><button data-n="6">6</button>
+  </div>
+  <div class="seg notif" id="notif" hidden></div>
+  <div class="seg" id="tools">
+    <button type="button" id="boardbtn" title="slog board: who holds which lock + recent activity">🗂 board</button>
+    <button type="button" id="upbtn" title="upload files to the active session">📎 upload</button>
+    <button type="button" id="dlbtn" title="download files from the server (starts in the outbox)">📥 download</button>
+    <button type="button" id="micbtn" title="dictate the prompt — typed into the session, no Enter">🎤 dictate</button>
+    <button type="button" id="clipbtn" title="copy the text an agent left with cr-clip">📋 clip</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="hint">every tile is a live <b>tmux</b> session · closing the browser only detaches</div>
+</header>
+<main id="grid" data-cols="2"></main>
+<div id="keybar">
+  <button type="button" class="kchip" id="winbtn" title="jump to another tile">⌨ <b id="kbsess">—</b><span class="caret">⌄</span></button>
+  <button class="stop" data-key="esc" title="Esc — stop Claude / cancel">esc</button>
+  <button data-key="up"    data-rep="1" title="↑ — prompt history">↑</button>
+  <button data-key="down"  data-rep="1" title="↓">↓</button>
+  <button data-key="left"  data-rep="1" title="←">←</button>
+  <button data-key="right" data-rep="1" title="→">→</button>
+  <button data-key="clear" data-confirm="1" title="clear the prompt (Ctrl-U) — double tap">clr</button>
+  <button data-key="susp"  data-confirm="1" title="suspend to the shell (Ctrl-Z) — double tap; come back with fg">^Z</button>
+  <button data-act="fg"    data-confirm="1" title="fg — resume the suspended app — double tap">fg</button>
+  <button data-key="tab"   title="Tab — autocomplete / mode">⇥</button>
+  <button data-key="enter" title="Enter — send">⏎</button>
+  <button data-act="board" title="slog board">🗂</button>
+  <button data-act="clip"  title="copy the text an agent left with cr-clip">📋 copy</button>
+  <button data-act="upload" title="upload files to this session">📎</button>
+  <!-- emoji on purpose: arrow glyphs like ⤓ are missing from many phone fonts and render as nothing -->
+  <button data-act="dl" title="download files">📥</button>
+  <button data-act="mic" title="dictate">🎤</button>
+  <button class="stop" data-key="ctrlc" title="Ctrl-C — interrupt">^C</button>
+</div>
+<div id="winmenu" hidden></div>
+
+<!-- Upload: a navigational form POST into an iframe. Never fetch/XHR — auth proxies that
+     challenge background requests (e.g. Cloudflare) would silently kill it. -->
+<div id="upov" class="ov" hidden>
+  <div id="upbox" class="box">
+    <h3>📎 upload files <button type="button" class="x" id="upclose">✕</button></h3>
+    <form id="upform" method="POST" action="upload" enctype="multipart/form-data" target="upres">
+      <label>to session <select name="sess" id="upsess"></select></label>
+      <input type="file" name="f" id="upfile" multiple>
+      <img id="uppreview" alt="" hidden>
+      <p id="uptip">tip: with an image on the clipboard, <b>Ctrl-V</b> over a terminal uploads it.</p>
+      <label><input type="checkbox" name="optimize" value="1" checked>
+        optimize for tokens (image → ≤1568px · pdf → + .txt)</label>
+      <label><input type="checkbox" name="typepath" value="1" checked>
+        type the path into the session's prompt (no Enter)</label>
+      <button type="submit" class="send" id="upsend">upload</button>
+    </form>
+    <iframe name="upres" id="upres"></iframe>
+  </div>
+</div>
+
+<div id="dlov" class="ov" hidden>
+  <div class="box wide">
+    <h3>📥 download files <button type="button" class="x" id="dlclose">✕</button></h3>
+    <iframe name="dlframe" id="dlframe" src="about:blank"></iframe>
+  </div>
+</div>
+
+<!-- Dictation: the recorded audio takes the SAME navigational path as uploads
+     (Blob → File → DataTransfer → <input type=file> → form POST into an iframe). -->
+<div id="stov" class="ov" hidden>
+  <div class="box">
+    <h3>🎤 dictation <button type="button" class="x" id="stclose">✕</button></h3>
+    <form id="stform" method="POST" action="stt" enctype="multipart/form-data" target="stres">
+      <input type="hidden" name="sess" id="stsess">
+      <input type="file" name="f" id="stfile" hidden>
+    </form>
+    <p id="ststatus" style="margin:0 0 8px;color:var(--muted);font-size:12px"></p>
+    <iframe name="stres" id="stframe"></iframe>
+  </div>
+</div>
+
+<div id="bdov" class="ov" hidden>
+  <div class="box wide">
+    <h3>🗂 board <button type="button" class="x" id="bdclose">✕</button></h3>
+    <div id="bdbody"></div>
+  </div>
+</div>
+
+<script>
+// Session names come from the server (CR_SESSIONS); this is only the pre-load fallback.
+let SESSIONS = ["claude1","claude2","claude3","claude4","shell"];
+let STATUS = {sessions:[], locks:[], feed:[], blocked:[]};
+const TTY = s => `tty/?arg=${encodeURIComponent(s)}`;
+const LAYOUTS = {1:{n:1,cols:1},2:{n:2,cols:2},4:{n:4,cols:2},6:{n:6,cols:3}};
+const grid = document.getElementById("grid");
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ── OSC 52 bridge → the device clipboard ────────────────────────────────────────────────
+// ttyd's xterm.js build registers no OSC 52 handler, so tmux's `set-clipboard on` went
+// nowhere and you could not copy to your PC/phone. We register one on the terminal that
+// ttyd exposes as `window.term` (same-origin iframe). Result: selecting in tmux copy-mode
+// lands in YOUR clipboard. Copy-mode also freezes the screen, so the selection is stable.
+function copyText(win, text){
+  const tryNav = nav => (nav && nav.clipboard && nav.clipboard.writeText) ? nav.clipboard.writeText(text) : Promise.reject();
+  tryNav(win.navigator).catch(()=>tryNav(window.navigator)).catch(()=>fallbackCopy(win, text));
+}
+function fallbackCopy(win, text){
+  try{
+    const d = win.document, ta = d.createElement("textarea");
+    ta.value = text; ta.style.cssText = "position:fixed;left:-9999px;opacity:0";
+    d.body.appendChild(ta); ta.focus(); ta.select(); d.execCommand("copy"); ta.remove();
+  }catch(e){}
+}
+function installOsc52(win){
+  try{
+    const term = win.term;
+    if(win.__osc52 || !term || !term.parser || !term.parser.registerOscHandler) return false;
+    win.__osc52 = true;
+    term.parser.registerOscHandler(52, data=>{
+      const semi = data.indexOf(";");                     // data = "<selection>;<base64>"
+      const b64 = semi >= 0 ? data.slice(semi+1) : data;
+      if(!b64 || b64 === "?") return true;                // a query, not a copy
+      try{
+        const bin = win.atob(b64), bytes = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+        copyText(win, new TextDecoder("utf-8").decode(bytes));   // atob gives bytes; decode keeps accents intact
+      }catch(e){}
+      return true;
+    });
+    return true;
+  }catch(e){ return false; }
+}
+
+// Every tile iframe is same-origin, so we can patch it:
+//  (1) refit: make ttyd recompute cols/rows for the real iframe size (kills the "empty strip").
+//  (2) touch → wheel: xterm.js does not turn a swipe into scrolling, so we synthesize wheel
+//      events and tmux enters copy-mode/scrollback under your finger. Swipe DOWN = history.
+function wireIframe(ifr, idx){
+  ifr.addEventListener("load", ()=>{
+    let doc, win;
+    try { win = ifr.contentWindow; doc = win.document; } catch(e){ return; }
+    if(!doc) return;
+    ["touchstart","mousedown","keydown","focusin"].forEach(evt=>
+      doc.addEventListener(evt, ()=>setActive(idx), {capture:true, passive:true}));
+    wireDrop(doc, ifr.closest(".tile"), idx);
+    wirePaste(doc, idx);
+    let tries = 0;
+    const t = setInterval(()=>{
+      const xterm = doc.querySelector(".xterm");
+      if(!xterm){ if(++tries>60) clearInterval(t); return; }
+      clearInterval(t);
+      try { win.dispatchEvent(new Event("resize")); } catch(e){}
+      (function waitTerm(n){ if(installOsc52(win) || n<=0) return; setTimeout(()=>waitTerm(n-1), 150); })(30);
+      const screen = doc.querySelector(".xterm-screen") || xterm;
+      const STEP = 22;
+      let prevY = null, accum = 0;
+      const fire = dir => screen.dispatchEvent(new WheelEvent("wheel", {deltaY:dir*32, deltaMode:0, bubbles:true, cancelable:true}));
+      doc.addEventListener("touchstart", e=>{ prevY = e.touches[0].clientY; accum = 0; }, {passive:true});
+      doc.addEventListener("touchmove", e=>{
+        if(prevY === null) return;
+        const y = e.touches[0].clientY;
+        accum += (prevY - y); prevY = y;                  // finger down ⇒ history (natural scrolling)
+        while(accum <= -STEP){ fire(-1); accum += STEP; }
+        while(accum >=  STEP){ fire( 1); accum -= STEP; }
+        if(e.cancelable) e.preventDefault();
+      }, {passive:false});
+      doc.addEventListener("touchend", ()=>{ prevY = null; }, {passive:true});
+    }, 120);
+  });
+}
+// Re-fit every terminal on resize/rotate and when this tab comes back into focus. With tmux
+// `window-size latest`, that makes the session take THIS device's width again after you used
+// it from your phone — without having to type anything.
+function pokeAll(){
+  document.querySelectorAll(".tile iframe").forEach(f=>{ try { f.contentWindow.dispatchEvent(new Event("resize")); } catch(e){} });
+}
+let rT;
+addEventListener("resize", ()=>{ clearTimeout(rT); rT = setTimeout(()=>{ pokeAll(); observeTiles(); fitBar(); }, 250); });
+addEventListener("focus", pokeAll);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) pokeAll(); });
+
+// Per-browser layout memory. localStorage can throw (private mode): the page works without it.
+function load(){ try{ return JSON.parse(localStorage.getItem("controlroom")||"null"); }catch(e){ return null; } }
+const state = load() || {layout:4, tiles:[]};
+function save(){ try{ localStorage.setItem("controlroom", JSON.stringify(state)); }catch(e){} }
+function sessOf(idx){
+  const s = state.tiles[idx];
+  return SESSIONS.includes(s) ? s : (SESSIONS[idx] || SESSIONS[SESSIONS.length-1]);
+}
+
+// ── On-screen keys (mobile) ───────────────────────────────────────────────────────────────
+// Injected as synthetic KeyboardEvents into the ACTIVE tile's .xterm-helper-textarea.
+// Gotcha: keyCode/which cannot be set through the KeyboardEvent constructor (they stay 0)
+// and xterm.js maps special keys by keyCode — so they are forced with defineProperty.
+const KEYS = {
+  esc:{key:"Escape",code:"Escape",kc:27}, up:{key:"ArrowUp",code:"ArrowUp",kc:38},
+  down:{key:"ArrowDown",code:"ArrowDown",kc:40}, left:{key:"ArrowLeft",code:"ArrowLeft",kc:37},
+  right:{key:"ArrowRight",code:"ArrowRight",kc:39}, tab:{key:"Tab",code:"Tab",kc:9},
+  enter:{key:"Enter",code:"Enter",kc:13}, ctrlc:{key:"c",code:"KeyC",kc:67,ctrl:true},
+  clear:{key:"u",code:"KeyU",kc:85,ctrl:true},   // Ctrl-U clears Claude's prompt (Escape does not)
+  susp:{key:"z",code:"KeyZ",kc:90,ctrl:true},    // Ctrl-Z SUSPENDS to the shell (not undo!) — `fg` resumes
+};
+let activeIdx = 0, io = null;
+function tilesArr(){ return [...grid.querySelectorAll(".tile")]; }
+function activeIframe(){ const t = tilesArr()[activeIdx] || tilesArr()[0]; return t ? t.querySelector("iframe") : null; }
+function setActive(idx){
+  activeIdx = idx;
+  tilesArr().forEach((t,i)=> t.classList.toggle("focus", i===idx));
+  document.getElementById("kbsess").textContent = sessOf(idx);
+}
+function termEl(ifr){
+  try{ const w = ifr.contentWindow; return [w, w.document.querySelector(".xterm-helper-textarea") || w.document.querySelector(".terminal")]; }
+  catch(e){ return [null, null]; }
+}
+// We deliberately do NOT focus the textarea: that would pop up the phone keyboard, which is
+// exactly what these buttons are for avoiding.
+function sendKeyTo(ifr, spec){
+  if(!ifr || !spec) return;
+  const [win, el] = termEl(ifr); if(!win || !el) return;
+  const ev = new win.KeyboardEvent("keydown", {key:spec.key, code:spec.code, view:win, bubbles:true, cancelable:true,
+                                               ctrlKey:!!spec.ctrl, altKey:false, shiftKey:false, metaKey:false});
+  Object.defineProperty(ev, "keyCode", {get:()=>spec.kc});
+  Object.defineProperty(ev, "which",   {get:()=>spec.kc});
+  const hadFocus = (win.document.activeElement === el);
+  el.dispatchEvent(ev);
+  if(!hadFocus && win.document.activeElement === el && el.blur) el.blur();
+}
+function sendKey(name){ sendKeyTo(activeIframe(), KEYS[name]); }
+// Printable characters go through 'keypress' (charCode) in xterm.js, not keydown.
+function sendStr(str){
+  const [win, el] = termEl(activeIframe()); if(!win || !el) return;
+  for(const ch of str){
+    const cc = ch.charCodeAt(0);
+    const ev = new win.KeyboardEvent("keypress", {key:ch, bubbles:true, cancelable:true});
+    ["charCode","keyCode","which"].forEach(p=> Object.defineProperty(ev, p, {get:()=>cc}));
+    el.dispatchEvent(ev);
+  }
+}
+// The phone keyboard would cover the key bar: lift the bar just above it.
+const kbBar = document.getElementById("keybar");
+let kbOpen = false, revT = null;
+function fitBar(){
+  const vv = window.visualViewport;
+  const overlap = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  const h = kbBar.offsetHeight;                          // 0 on desktop (display:none)
+  grid.style.paddingBottom = h ? (h + 8 + overlap) + "px" : "";
+}
+function placeKeybar(){
+  const vv = window.visualViewport; if(!vv) return;
+  const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  const t = overlap ? `translateY(${-overlap}px)` : "";
+  kbBar.style.transform = t;
+  document.getElementById("winmenu").style.transform = t;
+  fitBar();
+  const nowOpen = overlap > 0;
+  if(nowOpen && !kbOpen){ clearTimeout(revT); revT = setTimeout(revealActive, 260); }   // only when it OPENS
+  kbOpen = nowOpen;
+}
+function revealActive(){                                 // scroll so the prompt sits above keyboard + key bar
+  const vv = window.visualViewport; if(!vv) return;
+  const tile = tilesArr()[activeIdx]; if(!tile) return;
+  const delta = tile.getBoundingClientRect().bottom - (vv.offsetTop + vv.height - kbBar.offsetHeight - 10);
+  if(delta > 4) grid.scrollBy({top:delta, behavior:"smooth"});
+}
+if(window.visualViewport){
+  visualViewport.addEventListener("resize", placeKeybar);
+  visualViewport.addEventListener("scroll", placeKeybar);
+}
+(function wireKeybar(){
+  const bar = kbBar;
+  let holdT=null, repT=null, btn=null, armed=null, armT=null;
+  const disarm = ()=>{ if(armed){ armed.classList.remove("armed"); armed=null; } clearTimeout(armT); armT=null; };
+  const confirmTap = b=>{                                // 1st tap arms, 2nd within 2 s fires
+    if(armed===b){ disarm(); return true; }
+    disarm(); armed=b; b.classList.add("armed"); armT=setTimeout(disarm, 2000); return false;
+  };
+  const stop = ()=>{ clearTimeout(holdT); clearInterval(repT); holdT=repT=null; if(btn){ btn.classList.remove("pressed"); btn=null; } };
+  bar.addEventListener("pointerdown", e=>{
+    const b = e.target.closest("button[data-key]"); if(!b) return;
+    e.preventDefault();                                  // don't steal focus, no double-tap zoom
+    if(b.dataset.confirm){ if(!confirmTap(b)) return; } else disarm();
+    btn = b; b.classList.add("pressed");
+    sendKey(b.dataset.key);
+    if(b.dataset.rep) holdT = setTimeout(()=>{ repT = setInterval(()=>sendKey(b.dataset.key), 110); }, 380);   // hold to repeat
+  });
+  ["pointerup","pointercancel","pointerleave"].forEach(ev=> bar.addEventListener(ev, stop));
+  const fgBtn = bar.querySelector('[data-act="fg"]');
+  fgBtn.addEventListener("pointerdown", e=>{
+    e.preventDefault();
+    if(!confirmTap(fgBtn)) return;
+    fgBtn.classList.add("pressed"); sendStr("fg"); sendKey("enter");
+    setTimeout(()=>fgBtn.classList.remove("pressed"), 130);
+  });
+  bar.querySelector('[data-act="upload"]').addEventListener("click", ()=> openUpload(sessOf(activeIdx)));
+  bar.querySelector('[data-act="dl"]').addEventListener("click", openDownload);
+  bar.querySelector('[data-act="board"]').addEventListener("click", openBoard);
+})();
+(function wireWinMenu(){                                 // tap the session chip → jump to another tile
+  const btn = document.getElementById("winbtn"), menu = document.getElementById("winmenu");
+  const close = ()=>{ menu.hidden = true; };
+  btn.addEventListener("click", e=>{
+    e.stopPropagation();
+    if(!menu.hidden) return close();
+    menu.innerHTML = `<div class="wtitle">jump to tile</div>` + tilesArr().map((t,i)=>
+      `<button type="button" data-jump="${i}"${i===activeIdx?' class="cur"':''}>${i===activeIdx?"▸ ":"  "}${esc(sessOf(i))}</button>`).join("");
+    menu.style.bottom = "calc(" + (kbBar.offsetHeight + 8) + "px + env(safe-area-inset-bottom))";
+    menu.hidden = false;
+  });
+  menu.addEventListener("click", e=>{
+    const b = e.target.closest("button[data-jump]"); if(!b) return;
+    const idx = Number(b.dataset.jump); close(); setActive(idx);
+    const t = tilesArr()[idx]; if(t) t.scrollIntoView({behavior:"smooth", block:"nearest"});
+  });
+  document.addEventListener("click", e=>{ if(!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) close(); });
+  window.__closeWinMenu = close;
+})();
+
+// ── 📎 Upload ─────────────────────────────────────────────────────────────────────────────
+const upov = document.getElementById("upov"), upsel = document.getElementById("upsess"), upfile = document.getElementById("upfile");
+const upres = document.getElementById("upres"), upsend = document.getElementById("upsend"), upform = document.getElementById("upform");
+const uppre = document.getElementById("uppreview");
+let upBusy = false, upURL = null;
+function showPreview(file){
+  if(upURL){ URL.revokeObjectURL(upURL); upURL = null; }
+  if(file && /^image\//.test(file.type || "")){ upURL = URL.createObjectURL(file); uppre.src = upURL; uppre.hidden = false; }
+  else { uppre.removeAttribute("src"); uppre.hidden = true; }
+}
+// auto=true (pasted): the session is where you pasted, nothing to choose — upload right away.
+function openUpload(sess, files, auto){
+  upsel.innerHTML = SESSIONS.map(s=>`<option value="${esc(s)}"${s===sess?" selected":""}>${esc(s)}</option>`).join("");
+  upfile.value = ""; showPreview(null);
+  if(files && files.length){
+    try{ const dt = new DataTransfer(); [...files].forEach(f=>dt.items.add(f)); upfile.files = dt.files; }catch(e){}
+    showPreview(files[0]);
+  }
+  upres.classList.remove("show"); upres.src = "about:blank"; upBusy = false;
+  upsend.disabled = false; upsend.textContent = "upload";
+  upov.hidden = false;
+  if(auto && upfile.files.length){
+    // requestSubmit fires the submit event (plain submit() does not)
+    if(upform.requestSubmit) upform.requestSubmit(upsend); else { markUploading(); upform.submit(); }
+  }
+}
+function markUploading(){ upres.classList.add("show"); upBusy = true; upsend.disabled = true; upsend.textContent = "uploading…"; }
+function closeUpload(){ upov.hidden = true; showPreview(null); }
+document.getElementById("upclose").onclick = closeUpload;
+upov.addEventListener("click", e=>{ if(e.target === upov) closeUpload(); });
+upform.addEventListener("submit", e=>{ if(!upfile.files.length){ e.preventDefault(); return; } markUploading(); });
+upres.addEventListener("load", ()=>{
+  // After a form POST with target=, the iframe's src ATTRIBUTE still says about:blank,
+  // so it can't be used as the "done" signal — this flag can.
+  if(!upBusy) return;
+  upBusy = false; upsend.disabled = false; upsend.textContent = "upload more";
+});
+
+// Paste (Ctrl-V / long-press → Paste): a screenshot has no path on the server, so pasting
+// it = uploading it. RULE: if the clipboard also has usable text, we do NOT intercept —
+// Excel/Word/browsers copy image AND text together, and in a terminal the text wins.
+function clipFiles(dt){
+  if(!dt) return [];
+  let out = dt.files && dt.files.length ? [...dt.files] : [];
+  if(!out.length && dt.items) for(const it of dt.items){ if(it.kind === "file"){ const f = it.getAsFile(); if(f) out.push(f); } }
+  return out.map(f=>{                                    // screenshots arrive as "image.png" or nameless
+    if(f.name && !/^image\.[a-z0-9]+$/i.test(f.name)) return f;
+    const ext = ((f.type || "image/png").split("/")[1] || "png").replace("jpeg","jpg").replace("+xml","");
+    try{ return new File([f], "pasted." + ext, {type: f.type || "image/png"}); }catch(e){ return f; }
+  });
+}
+function pastedFiles(e){
+  const dt = e.clipboardData;
+  if(!dt || (dt.getData("text/plain") || "").trim()) return [];
+  return clipFiles(dt);
+}
+// capture:true inside the iframe → we run BEFORE xterm.js, which would otherwise eat the event.
+function wirePaste(doc, idx){
+  doc.addEventListener("paste", e=>{
+    const files = pastedFiles(e); if(!files.length) return;
+    e.preventDefault(); e.stopPropagation(); setActive(idx); openUpload(sessOf(idx), files, true);
+  }, true);
+}
+document.addEventListener("paste", e=>{
+  const files = pastedFiles(e); if(!files.length) return;
+  e.preventDefault(); openUpload(sessOf(activeIdx), files, true);
+}, true);
+// Drag & drop: the iframe swallows drag events, so we listen INSIDE its document.
+function wireDrop(doc, tile, idx){
+  ["dragover","dragenter"].forEach(evt=> doc.addEventListener(evt, e=>{
+    if(e.dataTransfer && [...e.dataTransfer.types].includes("Files")){ e.preventDefault(); tile.classList.add("drop"); }
+  }));
+  ["dragleave","dragend"].forEach(evt=> doc.addEventListener(evt, ()=> tile.classList.remove("drop")));
+  doc.addEventListener("drop", e=>{
+    tile.classList.remove("drop");
+    if(!e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault(); setActive(idx); openUpload(sessOf(idx), e.dataTransfer.files);
+  });
+}
+
+// ── 📥 Download: server-rendered listing in an iframe; each download is a plain link ────────
+const dlov = document.getElementById("dlov"), dlframe = document.getElementById("dlframe");
+function openDownload(){ dlframe.src = "files?t=" + Date.now(); dlov.hidden = false; }
+function closeDownload(){ dlov.hidden = true; dlframe.src = "about:blank"; }
+document.getElementById("dlclose").onclick = closeDownload;
+dlov.addEventListener("click", e=>{ if(e.target === dlov) closeDownload(); });
+document.getElementById("upbtn").onclick = ()=> openUpload(sessOf(activeIdx));
+document.getElementById("dlbtn").onclick = openDownload;
+
+// ── 📋 Clip: copy what an agent left with `cr-clip` ───────────────────────────────────────
+// A plain same-origin GET is fine here (only POSTs need the navigational-form trick).
+function clipBtns(){ return [...document.querySelectorAll('#clipbtn, #keybar [data-act="clip"]')]; }
+clipBtns().forEach(b=> b.dataset.lbl = b.textContent);
+let clipTimer = null;
+function clipFlash(msg){
+  clearTimeout(clipTimer);
+  clipBtns().forEach(b=> b.textContent = msg);
+  clipTimer = setTimeout(()=> clipBtns().forEach(b=> b.textContent = b.dataset.lbl), 1800);
+}
+async function fetchClip(){
+  try{ const r = await fetch("clip.txt?t="+Date.now(), {cache:"no-store"}); if(r.ok) return (await r.text()).replace(/\n+$/, ""); }catch(e){}
+  return "";   // the trailing newline would EXECUTE the command when pasted into a terminal
+}
+async function copyClip(){
+  const text = await fetchClip();
+  if(!text){ clipFlash("clip empty"); return; }
+  copyText(window, text);
+  clipMarkSeen(text); clipDot(false); clipFlash("✓ copied");
+  if(navigator.vibrate){ try{ navigator.vibrate(12); }catch(_){} }
+}
+clipBtns().forEach(b=> b.addEventListener("click", copyClip));
+// Green dot = NEW content. "New" is by content, not mtime: rewriting the same text doesn't light it.
+function clipSeen(){ try{ return localStorage.getItem("clipSeen") || ""; }catch(e){ return ""; } }
+function clipMarkSeen(t){ try{ localStorage.setItem("clipSeen", t); }catch(e){} }
+function clipDot(on){ clipBtns().forEach(b=> b.classList.toggle("newclip", !!on)); }
+async function pollClip(){ const t = await fetchClip(); clipDot(t && t !== clipSeen()); }
+setInterval(pollClip, 4000); pollClip();
+
+// ── 🎤 Dictation: MediaRecorder → POST stt → Whisper → typed into the prompt, no Enter ──────
+const stov = document.getElementById("stov"), stframe = document.getElementById("stframe"), stform = document.getElementById("stform");
+const stfile = document.getElementById("stfile"), stsess = document.getElementById("stsess"), ststatus = document.getElementById("ststatus");
+const MIC_MAX = 180;                                     // hard cap in seconds
+let rec = null, recChunks = [], recStream = null, recTimer = null, recT0 = 0, recSess = "", stBusy = false;
+function micBtns(){ return [...document.querySelectorAll('#micbtn, #keybar [data-act="mic"]')]; }
+micBtns().forEach(b=> b.dataset.lbl = b.textContent);
+function micIdle(){ micBtns().forEach(b=>{ b.classList.remove("rec"); b.textContent = b.dataset.lbl; }); }
+function micRecUI(s){ const t = "⏹ " + Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); micBtns().forEach(b=>{ b.classList.add("rec"); b.textContent = t; }); }
+// iOS Safari only records audio/mp4; Chrome/Android use webm/opus. Whisper accepts all of them.
+function micMime(){
+  for(const m of ["audio/webm;codecs=opus","audio/webm","audio/mp4","audio/ogg;codecs=opus"])
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return "";
+}
+function micExt(m){ return /mp4|m4a|aac/.test(m) ? "m4a" : (/ogg/.test(m) ? "ogg" : "webm"); }
+async function micStart(){
+  if(!navigator.mediaDevices || !window.MediaRecorder){ alert("This browser cannot record audio."); return; }
+  recSess = sessOf(activeIdx);                           // the target session is frozen when you START
+  try{
+    recStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}});
+  }catch(e){
+    // NotAllowedError while the SITE permission is granted = the OS is blocking the browser,
+    // or a Permissions-Policy header from your proxy (it must allow microphone=(self)).
+    let st = "?"; try{ st = (await navigator.permissions.query({name:"microphone"})).state; }catch(_){}
+    alert("Could not use the microphone (" + (e.name || e) + " · site permission: " + st + ").\n\n" +
+      (st === "granted"
+        ? "The site HAS permission ⇒ something else blocks it:\n• the OS (Android: app permissions; iOS: Settings > Safari > Microphone; Windows: Privacy > Microphone)\n• a Permissions-Policy header from your reverse proxy"
+        : "Allow the microphone for this site in the browser's address bar."));
+    return;
+  }
+  const mime = micMime();
+  try{ rec = mime ? new MediaRecorder(recStream, {mimeType:mime}) : new MediaRecorder(recStream); }catch(e){ rec = new MediaRecorder(recStream); }
+  recChunks = [];
+  rec.ondataavailable = e => { if(e.data && e.data.size) recChunks.push(e.data); };
+  rec.onstop = micSend;
+  rec.start(); recT0 = Date.now(); micRecUI(0);
+  recTimer = setInterval(()=>{ const s = Math.round((Date.now()-recT0)/1000); micRecUI(s); if(s >= MIC_MAX) micStop(); }, 500);
+}
+function micStop(){ if(recTimer){ clearInterval(recTimer); recTimer = null; } if(rec && rec.state !== "inactive"){ try{ rec.stop(); }catch(e){} } }
+function micSend(){
+  const type = (rec && rec.mimeType) || "audio/webm";
+  const blob = new Blob(recChunks, {type});
+  if(recStream){ recStream.getTracks().forEach(t=>t.stop()); recStream = null; }   // release the mic NOW (red dot)
+  rec = null; recChunks = []; micIdle();
+  if(blob.size < 1500) return;                           // accidental tap
+  try{ const dt = new DataTransfer(); dt.items.add(new File([blob], "dictation." + micExt(type), {type})); stfile.files = dt.files; }
+  catch(e){ alert("Could not prepare the audio"); return; }
+  stsess.value = recSess;
+  ststatus.textContent = "transcribing for " + recSess + "…";
+  stov.hidden = false; stBusy = true;
+  if(stform.requestSubmit) stform.requestSubmit(); else stform.submit();
+}
+function micToggle(){ rec ? micStop() : micStart(); }
+document.getElementById("micbtn").onclick = micToggle;
+kbBar.querySelector('[data-act="mic"]').addEventListener("click", micToggle);
+function stClose(){ stov.hidden = true; stframe.src = "about:blank"; ststatus.textContent = ""; }
+document.getElementById("stclose").onclick = stClose;
+stov.addEventListener("click", e=>{ if(e.target === stov) stClose(); });
+stframe.addEventListener("load", ()=>{
+  if(!stBusy) return;
+  stBusy = false; ststatus.textContent = "";
+  let ok = false; try{ ok = stframe.contentDocument.body.dataset.ok === "1"; }catch(e){}
+  if(ok) setTimeout(()=>{ if(!stBusy && !stov.hidden) stClose(); }, 2200);   // success → auto-close
+});
+
+// ── 🗂 Board: slog locks + feed ────────────────────────────────────────────────────────────
+const bdov = document.getElementById("bdov"), bdbody = document.getElementById("bdbody");
+function renderBoard(){
+  const L = STATUS.locks || [], F = (STATUS.feed || []).slice().reverse();
+  bdbody.innerHTML =
+    `<h4>active locks</h4>` + (L.length ? L.map(l=>
+      `<div class="brow"><span class="m">🔒 ${esc(l.key)}</span><span class="w">${esc(l.owner)}</span>` +
+      `<span class="t${l.stale?" stale":""}">${esc(l.since.slice(11))}${l.stale?" ⚠ stale":""}</span></div>`).join("")
+      : `<p class="empty">none</p>`) +
+    `<h4>recent activity</h4>` + (F.length ? F.map(f=>
+      `<div class="brow"><span class="t">${esc(f.ts.slice(11))}</span><span class="w">${esc(f.who)}</span><span class="m">${esc(f.msg)}</span></div>`).join("")
+      : `<p class="empty">nothing yet — sessions write here with <b>slog</b></p>`);
+}
+function openBoard(){ renderBoard(); bdov.hidden = false; }
+document.getElementById("boardbtn").onclick = openBoard;
+document.getElementById("bdclose").onclick = ()=>{ bdov.hidden = true; };
+bdov.addEventListener("click", e=>{ if(e.target === bdov) bdov.hidden = true; });
+
+// ── Grid ──────────────────────────────────────────────────────────────────────────────────
+// On mobile (one scrolling column) the most visible tile becomes the active one.
+function observeTiles(){
+  if(io){ io.disconnect(); io = null; }
+  if(!window.matchMedia("(max-width:760px)").matches) return;
+  const ratio = new Map();
+  io = new IntersectionObserver(es=>{
+    es.forEach(e=> ratio.set(Number(e.target.dataset.idx), e.intersectionRatio));
+    let best=0.4, bi=-1; ratio.forEach((r,i)=>{ if(r>best){ best=r; bi=i; } });
+    if(bi>=0 && bi!==activeIdx) setActive(bi);
+  }, {threshold:[0,0.3,0.6,0.9]});
+  tilesArr().forEach(t=> io.observe(t));
+}
+function tileEl(idx){
+  const sess = sessOf(idx);
+  const tile = document.createElement("div"); tile.className = "tile"; tile.dataset.idx = idx;
+  const bar = document.createElement("div"); bar.className = "tbar";
+  bar.innerHTML =
+    `<span class="st" title="state"></span>
+     <select>${SESSIONS.map(s=>`<option value="${esc(s)}"${s===sess?" selected":""}>${esc(s)}</option>`).join("")}</select>
+     <span class="locks"></span>
+     <span class="tspacer"></span>
+     <button data-act="up" title="upload files to this session (or drop them on it)">📎</button>
+     <button data-act="reload" title="reload this tile">⟳</button>
+     <button data-act="clear" title="clear this tile's scrollback (frees tmux memory)">🧹</button>
+     <button data-act="full" title="full screen">⤢</button>`;
+  const ifr = document.createElement("iframe");
+  ifr.src = TTY(sess); ifr.setAttribute("allow", "clipboard-read; clipboard-write");
+  wireIframe(ifr, idx);
+  const sel = bar.querySelector("select");
+  sel.onchange = ()=>{ state.tiles[idx] = sel.value; save(); ifr.src = TTY(sel.value); if(idx===activeIdx) setActive(idx); paintStatus(); };
+  bar.querySelector('[data-act="up"]').onclick = ()=>{ setActive(idx); openUpload(sel.value); };
+  bar.querySelector('[data-act="reload"]').onclick = ()=>{ ifr.src = TTY(sel.value); };
+  // F12 is bound to `clear-history` in the example tmux.conf
+  bar.querySelector('[data-act="clear"]').onclick = ()=> sendKeyTo(ifr, {key:"F12", code:"F12", kc:123});
+  bar.querySelector('[data-act="full"]').onclick = e=>{
+    tile.classList.toggle("full");
+    e.target.textContent = tile.classList.contains("full") ? "✕" : "⤢";
+    setActive(idx);
+  };
+  tile.append(bar, ifr);
+  return tile;
+}
+function render(){
+  const L = LAYOUTS[state.layout] || LAYOUTS[4];
+  grid.dataset.cols = L.cols;
+  grid.innerHTML = "";
+  for(let i=0;i<L.n;i++){ if(!state.tiles[i]) state.tiles[i] = sessOf(i); grid.append(tileEl(i)); }
+  document.querySelectorAll("#layout button").forEach(b=> b.classList.toggle("on", Number(b.dataset.n)===state.layout));
+  setActive(Math.min(activeIdx, L.n-1));
+  observeTiles(); fitBar(); paintStatus();
+  if(window.__closeWinMenu) window.__closeWinMenu();
+  save();
+}
+document.querySelectorAll("#layout button").forEach(b=> b.onclick = ()=>{ state.layout = Number(b.dataset.n); render(); });
+
+// ── Status: state dots, lock chips, "needs you" badges ────────────────────────────────────
+function jumpToSession(sess){
+  const tiles = tilesArr();
+  let idx = tiles.findIndex((t,i)=> sessOf(i) === sess);
+  if(idx < 0){                                           // not on screen → load it into the active tile
+    idx = Math.min(activeIdx, tiles.length-1);
+    state.tiles[idx] = sess; save();
+    const t = tiles[idx];
+    t.querySelector("select").value = sess;
+    t.querySelector("iframe").src = TTY(sess);
+  }
+  setActive(idx);
+  tilesArr()[idx].scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+const notif = document.getElementById("notif");
+notif.addEventListener("click", e=>{ const b = e.target.closest("button[data-jump-sess]"); if(b) jumpToSession(b.dataset.jumpSess); });
+const STATE_LABEL = {working:"working", blocked:"WAITING FOR YOUR PERMISSION", idle:"idle — waiting for a prompt",
+                     shell:"shell", off:"not started (opens on first view)", unknown:"no hook events yet"};
+function paintStatus(){
+  const by = {}; (STATUS.sessions || []).forEach(s=> by[s.name] = s);
+  tilesArr().forEach((t,i)=>{
+    const s = by[sessOf(i)] || {state:"unknown", locks:[]};
+    const dot = t.querySelector(".st");
+    dot.dataset.s = s.state; dot.title = STATE_LABEL[s.state] || s.state;
+    t.querySelector(".locks").innerHTML = (s.locks || []).map(k=> `<span class="lk" title="holds lock ${esc(k)}">🔒 ${esc(k)}</span>`).join("");
+  });
+  const blocked = STATUS.blocked || [];
+  notif.hidden = !blocked.length;
+  notif.innerHTML = blocked.map(s=> `<button type="button" data-jump-sess="${esc(s)}" title="${esc(s)} needs your permission — tap to go"><span class="pin"></span>${esc(s)}</button>`).join("");
+  document.body.classList.toggle("nostt", !STATUS.stt);
+  if(!bdov.hidden) renderBoard();
+}
+async function pollStatus(){
+  try{
+    const r = await fetch("api/status?t="+Date.now(), {cache:"no-store"});
+    if(!r.ok) return false;
+    STATUS = await r.json();
+    const names = (STATUS.sessions || []).map(s=> s.name);
+    if(names.length && names.join() !== SESSIONS.join()){ SESSIONS = names; render(); return true; }
+    paintStatus();
+    return true;
+  }catch(e){ return false; }
+}
+document.body.classList.add("nostt");                    // hidden until the server says dictation is configured
+pollStatus().finally(()=>{ if(!grid.children.length) render(); });
+setInterval(pollStatus, 3000);
+</script>
+</body>
+</html>

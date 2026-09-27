@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# cr-expose — hand a file to the human: copies it to the outbox, the first folder the
+# 📥 download dialog opens. The outbox never empties itself; use --clean now and then.
+#
+#   cr-expose report.pdf [name]      copy into the outbox (optionally renamed)
+#   cr-expose --list                 what is exposed right now
+#   cr-expose --clean [days]         delete outbox files older than N days (default 7)
+set -euo pipefail
+# same default as server.py: <workdir>/.controlroom/outbox (cr-session exports CR_OUTBOX into every session)
+OUT="${CR_OUTBOX:-${CR_DATA_DIR:-${CR_WORKDIR:-$PWD}/.controlroom}/outbox}"
+mkdir -p "$OUT"
+case "${1:-}" in
+  --list)  ls -lt "$OUT";;
+  --clean) find "$OUT" -type f -mtime +"${2:-7}" -print -delete;;
+  "")      echo "usage: cr-expose <file> [name] | --list | --clean [days]" >&2; exit 1;;
+  *)       src="$1"; name="${2:-$(basename "$src")}"
+           cp -- "$src" "$OUT/$name"; echo "📥 exposed: $OUT/$name";;
+esac

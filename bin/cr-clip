@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# cr-clip — leave text for the human to copy with one tap (📋 button in the UI).
+#
+# Copying out of a terminal is awkward (the Claude TUI repaints and eats browser selections,
+# and phones have no real drag-select). So instead: the agent writes the text here and the
+# 📋 button copies it. A green dot on the button means "new, not copied yet".
+#
+#   cr-clip "some long command"      set the clip
+#   echo "multi\nline" | cr-clip     set it from stdin
+#   cr-clip --show | --clear
+set -euo pipefail
+DIR="${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}"
+F="$DIR/clip.txt"; mkdir -p "$DIR"
+case "${1:-}" in
+  --show)  cat "$F" 2>/dev/null || true;;
+  --clear) : > "$F"; echo "clip cleared";;
+  "")      cat > "$F.tmp" && mv "$F.tmp" "$F"; echo "📋 clip set ($(wc -c < "$F") bytes)";;
+  *)       printf '%s' "$*" > "$F.tmp" && mv "$F.tmp" "$F"; echo "📋 clip set ($(wc -c < "$F") bytes)";;
+esac

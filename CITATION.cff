@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use or build on this software, please credit it as below."
+title: "Claude Code Control Room"
+abstract: "A web control room for running several Claude Code sessions in parallel: live terminals, per-session state from Claude Code hooks, and a shared board with hierarchical advisory locks."
+type: software
+authors:
+  - given-names: Ramiro
+    family-names: Soler
+license: MIT
+repository-code: "https://github.com/Ramillax/claude-code-control-room"
+date-released: "2026-09-27"

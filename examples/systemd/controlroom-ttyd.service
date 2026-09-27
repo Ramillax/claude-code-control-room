@@ -1,0 +1,21 @@
+# ~/.config/systemd/user/controlroom-ttyd.service
+# Enable: systemctl --user daemon-reload && systemctl --user enable --now controlroom-ttyd controlroom-web
+# Survive logout: loginctl enable-linger $USER   (needs sudo once)
+[Unit]
+Description=controlroom: ttyd terminals (tmux sessions for Claude Code)
+
+[Service]
+EnvironmentFile=-%h/claude-code-control-room/controlroom.env
+Environment=CR_TTYD_SOCKET=%h/.local/state/controlroom/ttyd.sock
+ExecStartPre=/bin/mkdir -p %h/.local/state/controlroom
+ExecStartPre=/bin/rm -f %h/.local/state/controlroom/ttyd.sock
+ExecStart=/usr/bin/ttyd -i %h/.local/state/controlroom/ttyd.sock -b /tty -W -a -m 30 -P 30 -t fontSize=14 %h/claude-code-control-room/bin/cr-session
+Restart=always
+RestartSec=2
+# IMPORTANT. The tmux server is started by ttyd, so it lives in THIS unit's cgroup. With the
+# default KillMode=control-group, `systemctl restart` would kill tmux and EVERY Claude session
+# with it. KillMode=process stops only ttyd; tmux (and your work) survives.
+KillMode=process
+
+[Install]
+WantedBy=default.target

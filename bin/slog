@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# slog — a shared, append-only "board" so parallel Claude Code sessions can see each other.
+#
+# Every Claude Code window is blind to what the others are doing. slog gives them one plain
+# Markdown file they all read and append to: a feed of "what I'm doing" plus advisory locks.
+# Writing costs one Bash call and nothing is auto-loaded into context, so it stays cheap.
+#
+#   slog "free text"             append a line to the feed (what this session is doing)
+#   slog take <resource> [note]  take an advisory lock; warns if it OVERLAPS another session's lock
+#   slog free <resource> [note]  release it (prints how long you held it)
+#   slog status                  active locks + recent feed   <- run this BEFORE touching shared stuff
+#   slog tail [N]                last N raw lines (default 20)
+#   slog locks                   active locks as TSV: key, owner, since, flag (machine-readable)
+#   slog done                    end of session: delete YOUR lines (keeps other sessions' lines)
+#   slog trim [days]             prune lines older than N days (default 2); `trim 0` wipes everything
+#
+# HIERARCHICAL RESOURCES — segments separated by ':'
+#   slog take api                 # the whole "api" resource
+#   slog take "api:auth"          # only its "auth" part
+#   Two sessions on different children (api:auth vs api:billing) do NOT conflict.
+#   A parent (api) conflicts with any of its children, and vice versa.
+#
+# ALIASES (optional): a file with `alias=canonical-id` lines, so "billing" and "wf_8f3kQ2"
+# normalize to the same lock key. Location: $SLOG_ALIASES (default: <board dir>/slog-aliases).
+#
+# WHO AM I: the handle is the tmux SESSION name (#S), unique per window. Override: SLOG_TAG=name.
+#
+# SESSION STAMP: when run inside Claude Code, every line ends with `· s:<CLAUDE_CODE_SESSION_ID>`.
+# That id IS the transcript file name (~/.claude/projects/<project>/<id>.jsonl), so any board line
+# (or a take/free pair = a time window) can be traced back to the exact conversation that wrote it.
+# It cannot be reconstructed later — the transcript knows nothing about tmux — so it is stamped now.
+#
+# Locks are ADVISORY: nothing stops a session from ignoring them. They work because the
+# agent is told (in CLAUDE.md) to check `slog status` and `take` before touching shared things.
+set -euo pipefail
+
+BOARD="${SLOG_BOARD:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom/SESSIONS.md}"
+ALIASES="${SLOG_ALIASES:-$(dirname "$BOARD")/slog-aliases}"
+STALE_HOURS="${SLOG_STALE_HOURS:-4}"   # a lock older than this is flagged "stale" (window probably closed)
+LOCKFILE="$BOARD.lock"
+
+tag() {
+  if [ -n "${SLOG_TAG:-}" ]; then echo "$SLOG_TAG"; return; fi
+  if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    local s; s=$(tmux display-message -p '#S' 2>/dev/null || true)
+    [ -n "$s" ] && { echo "$s"; return; }
+  fi
+  echo "pid$$"
+}
+ts()  { date '+%Y-%m-%d %H:%M'; }
+sid() { printf '%s' "${CLAUDE_CODE_SESSION_ID:-}"; }
+TAG=$(tag)
+SID=$(sid)
+
+# Serialize every writer with flock, so a check-then-append in `take` cannot race another window.
+mutex() {
+  mkdir -p "$(dirname "$BOARD")"
+  exec 9>"$LOCKFILE"
+  flock -w 10 9 || { echo "slog: board is busy (could not get $LOCKFILE)" >&2; exit 1; }
+}
+
+# canon: normalize the first segment through the alias file, so every spelling maps to one key.
+canon() {
+  local r="$1" root rest line a c
+  root="${r%%:*}"
+  if [ "$root" = "$r" ]; then rest=""; else rest=":${r#*:}"; fi
+  if [ -f "$ALIASES" ]; then
+    while IFS= read -r line; do
+      case "$line" in ''|'#'*) continue;; esac
+      a="${line%%=*}"; c="${line#*=}"
+      # both the alias and its canonical id resolve to the alias (the readable name)
+      if [ "$root" = "$a" ] || [ "$root" = "$c" ]; then root="$a"; break; fi
+    done < "$ALIASES"
+  fi
+  printf '%s%s' "$root" "$rest"
+}
+
+ensure() {
+  [ -f "$BOARD" ] && return
+  mkdir -p "$(dirname "$BOARD")"
+  {
+    echo "# SESSIONS — live board shared by parallel Claude Code sessions (ephemeral, append-only)"
+    echo "# Before touching anything shared: slog status   ·   locks: 'api' (whole) or 'api:auth' (part)"
+    echo
+  } > "$BOARD"
+}
+append() {
+  ensure
+  if [ -n "$SID" ]; then printf '%s · %s · %s · s:%s\n' "$(ts)" "$TAG" "$1" "$SID" >> "$BOARD"
+  else                    printf '%s · %s · %s\n'        "$(ts)" "$TAG" "$1"          >> "$BOARD"; fi
+}
+
+# active_locks: current locks (last event per key is a TAKE). TSV: key owner since flag
+active_locks() {
+  ensure
+  local now; now=$(date '+%s')
+  declare -A st owner whenv
+  local state key w t ck e flag
+  while IFS=$'\t' read -r state key w t; do
+    [ -z "${key:-}" ] && continue
+    ck=$(canon "$key")
+    st[$ck]=$state; owner[$ck]=$w; whenv[$ck]=$t
+  done < <(awk -F' · ' '
+    function bracket(s){ if (match(s,/\[[^]]*\]/)) return substr(s,RSTART+1,RLENGTH-2); return "" }
+    NF>=3 {
+      msg=$3
+      if      (msg ~ /^🔒 TAKE /) { k=bracket(msg); if(k!="") printf "T\t%s\t%s\t%s\n",k,$2,$1 }
+      else if (msg ~ /^✅ FREE /) { k=bracket(msg); if(k!="") printf "F\t%s\t%s\t%s\n",k,$2,$1 }
+    }' "$BOARD")
+  [ -z "${st[*]+x}" ] && return 0   # empty array under `set -u`
+  for ck in "${!st[@]}"; do
+    [ "${st[$ck]}" = "T" ] || continue
+    e=$(date -d "${whenv[$ck]}" +%s 2>/dev/null || echo 0)
+    flag=""; { [ "$e" -gt 0 ] && [ $((now-e)) -gt $((STALE_HOURS*3600)) ]; } && flag="stale"
+    printf '%s\t%s\t%s\t%s\n' "$ck" "${owner[$ck]}" "${whenv[$ck]}" "$flag"
+  done
+}
+
+# overlap a b -> true if equal, or one is an ancestor of the other by ':' segments
+overlap() {
+  local a="$1" b="$2"
+  [ "$a" = "$b" ] && return 0
+  case "$b" in "$a":*) return 0;; esac
+  case "$a" in "$b":*) return 0;; esac
+  return 1
+}
+
+# key of a TAKE line (empty if the line is not a TAKE)
+take_key() { printf '%s' "$1" | awk -F' · ' '$3 ~ /^🔒 TAKE / { if (match($3,/\[[^]]*\]/)) print substr($3,RSTART+1,RLENGTH-2) }'; }
+
+CMD="${1:-status}"
+case "$CMD" in
+  take)
+    mutex
+    R=$(canon "${2:?usage: slog take <resource> [note]   (e.g. api   or   \"api:auth\")}"); shift 2 || true
+    CONF=""
+    while IFS=$'\t' read -r key who when flag; do
+      [ -z "${key:-}" ] && continue
+      [ "$who" = "$TAG" ] && continue
+      if overlap "$key" "$R"; then CONF="${CONF}"$'\n'"   🔒 ${key} — ${who} (${when}${flag:+ ⚠$flag})"; fi
+    done < <(active_locks)
+    if [ -n "$CONF" ]; then
+      echo "⚠️  '$R' OVERLAPS lock(s) held by another session:" >&2
+      printf '%s\n' "${CONF#$'\n'}" >&2
+      echo "   (recorded under your name anyway — coordinate before you overwrite their work)" >&2
+    fi
+    append "🔒 TAKE [$R] ${*:-}"
+    echo "🔒 taken: $R   (release with: slog free \"$R\")"
+    ;;
+  free)
+    mutex
+    R=$(canon "${2:?usage: slog free <resource> [note]}"); shift 2 || true
+    START=""
+    while IFS=$'\t' read -r key who when flag; do
+      [ -z "${key:-}" ] && continue
+      if [ "$key" = "$R" ] && [ "$who" = "$TAG" ]; then START="$when"; fi
+    done < <(active_locks)
+    SPAN=""
+    if [ -n "$START" ]; then
+      s0=$(date -d "$START" +%s 2>/dev/null || echo 0)
+      [ "$s0" -gt 0 ] && SPAN=" ($(( ($(date +%s)-s0)/60 ))m since ${START:11:5})"
+    fi
+    append "✅ FREE [$R]${SPAN} ${*:-}"; echo "✅ released: $R${SPAN}"
+    ;;
+  status|st)
+    echo "── active locks ──"
+    OUT=$(active_locks | awk -F'\t' '{printf "  🔒 %-26s %s  (%s%s)\n", $1, $2, $3, ($4!=""?" ⚠"$4:"")}')
+    [ -n "$OUT" ] && echo "$OUT" || echo "  (none)"
+    echo "── feed (last 12) ──"; ensure
+    { grep -v '^#' "$BOARD" | grep -v '^[[:space:]]*$' | tail -n 12 | sed -E 's/ · s:[0-9a-f-]{8,}$//'; } || true
+    ;;
+  locks) active_locks;;
+  tail)  ensure; tail -n "${2:-20}" "$BOARD";;
+  trim)
+    # Prune by AGE. Keeps headers and the TAKE line of any lock that is still open, however old.
+    mutex; ensure
+    DAYS="${2:-2}"
+    CUTOFF=$(date -d "-${DAYS} days" '+%s')
+    BAK="${BOARD}.bak-$(date '+%Y%m%d-%H%M%S')"
+    cp "$BOARD" "$BAK"
+    LIVE=$(active_locks | cut -f1)
+    TMP=$(mktemp "${BOARD}.tmp.XXXX")
+    DROPPED=0
+    while IFS= read -r line; do
+      case "$line" in '#'*|'') echo "$line" >> "$TMP"; continue;; esac
+      e=$(date -d "${line%% · *}" +%s 2>/dev/null || echo 0)
+      if [ "$e" -eq 0 ] || [ "$e" -ge "$CUTOFF" ]; then echo "$line" >> "$TMP"; continue; fi
+      k=$(take_key "$line")
+      if [ -n "$k" ] && printf '%s\n' "$LIVE" | grep -qxF "$(canon "$k")"; then echo "$line" >> "$TMP"
+      else DROPPED=$((DROPPED+1)); fi
+    done < "$BOARD"
+    mv "$TMP" "$BOARD"
+    find "$(dirname "$BOARD")" -maxdepth 1 -name "$(basename "$BOARD").bak-*" -mtime +14 -delete 2>/dev/null || true
+    append "🧹 trim: -${DROPPED} lines older than ${DAYS}d (backup $(basename "$BAK"))"
+    echo "🧹 trim OK: ${DROPPED} pruned · backup: $BAK"
+    ;;
+  done|mine)
+    # End of session. Deletes YOUR lines only — by then whatever mattered should already be saved
+    # somewhere durable (docs, commit, memory). Never deletes:
+    #   · other sessions' lines (their feed is their unfinished business, not yours)
+    #   · lines with your handle but ANOTHER Claude session id (an earlier conversation in this
+    #     same tmux window, e.g. before /clear — it may not have saved its work yet)
+    #   · the TAKE line of a lock you still hold (it warns you instead)
+    mutex; ensure
+    BAK="${BOARD}.bak-$(date '+%Y%m%d-%H%M%S')"
+    cp "$BOARD" "$BAK"
+    LIVE=$(active_locks | cut -f1)
+    MINE_LIVE=$(active_locks | awk -F'\t' -v me="$TAG" '$2==me {print $1}')
+    TMP=$(mktemp "${BOARD}.tmp.XXXX")
+    DROPPED=0; OTHERS=""; OTHER_SESS=0
+    while IFS= read -r line; do
+      case "$line" in '#'*|'') echo "$line" >> "$TMP"; continue;; esac
+      who=$(printf '%s' "$line" | awk -F' · ' 'NF>=3 {print $2}')
+      if [ -z "$who" ] || [ "$who" != "$TAG" ]; then
+        echo "$line" >> "$TMP"; [ -n "$who" ] && OTHERS="$OTHERS$who"$'\n'; continue
+      fi
+      line_sid=$(printf '%s' "$line" | grep -oE 's:[0-9a-f-]{36}$' | cut -d: -f2 || true)
+      if [ -n "$SID" ] && [ -n "$line_sid" ] && [ "$line_sid" != "$SID" ]; then
+        echo "$line" >> "$TMP"; OTHER_SESS=$((OTHER_SESS+1)); continue
+      fi
+      k=$(take_key "$line")
+      if [ -n "$k" ] && printf '%s\n' "$LIVE" | grep -qxF "$(canon "$k")"; then echo "$line" >> "$TMP"
+      else DROPPED=$((DROPPED+1)); fi
+    done < "$BOARD"
+    mv "$TMP" "$BOARD"
+    find "$(dirname "$BOARD")" -maxdepth 1 -name "$(basename "$BOARD").bak-*" -mtime +14 -delete 2>/dev/null || true
+    if [ -n "$MINE_LIVE" ]; then
+      echo "⚠️  you still hold OPEN locks (their TAKE lines were kept): $(printf '%s' "$MINE_LIVE" | tr '\n' ' ')" >&2
+      echo "    release them with: slog free <resource>" >&2
+    fi
+    append "🧹 done: -${DROPPED} own lines (backup $(basename "$BAK"))"
+    echo "🧹 done OK: ${DROPPED} of your lines removed · backup: $BAK"
+    [ "$OTHER_SESS" -gt 0 ] && echo "   · kept ${OTHER_SESS} lines from an earlier conversation in this same window" >&2
+    REST=$(printf '%s' "$OTHERS" | grep -v '^$' | sort -u | tr '\n' ' ' || true)
+    [ -n "$REST" ] && echo "   other sessions still on the board (not yours to delete): $REST"
+    ;;
+  -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//';;
+  *) mutex; append "$*"; echo "✍️  $TAG: $*";;
+esac
