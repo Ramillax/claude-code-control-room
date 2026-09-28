@@ -13,6 +13,10 @@ server reads to paint a dot on each tile and raise a badge when a session needs 
 
 Why hooks and not screen-scraping: reading the terminal with regexes breaks every time
 the Claude Code UI changes. Hook events are a documented interface.
+One gap: answering a permission prompt with "no" (or Esc) fires no hook at all —
+PermissionDenied is only for auto-mode classifier denials. The server closes it by
+checking the pane (see effective_state in server/server.py), so this hook records the
+pane id along with the state.
 
 The hook must never break Claude: every error is swallowed and it always exits 0.
 It does nothing when Claude is not running inside tmux (no session name to report).
@@ -78,7 +82,9 @@ def main():
             pass
         return
     data = {"state": st, "ts": int(time.time()), "event": ev.get("hook_event_name", ""),
-            "claude_session_id": ev.get("session_id", "")}
+            "claude_session_id": ev.get("session_id", ""),
+            # the exact pane Claude runs in, so the server can confirm "blocked" on screen
+            "pane": os.environ.get("TMUX_PANE", "")}
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(data, fh)

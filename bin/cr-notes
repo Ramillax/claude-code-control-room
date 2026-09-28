@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# cr-notes — a tiny per-project state file: what's DONE, what's NEXT, what NOT to redo.
+#
+# The board (slog) is per session and ephemeral. This is per PROJECT and durable. It exists for
+# one failure: a session after /clear or compaction that redoes work that's already finished,
+# or reopens a decision that was already made. hooks/cr-context-hook.py injects this file into
+# every new session (and again after compaction), so the agent starts knowing it.
+#
+#   cr-notes done "migrated users table to v2"     record something finished
+#   cr-notes next "backfill created_at"            record what comes next
+#   cr-notes dont "don't bump pg to 17: breaks X"  a decision / trap nobody should redo
+#   cr-notes show                                  print it (default)
+#   cr-notes drop <n>                              remove line n (as numbered by `show`)
+#   cr-notes path                                  where the file lives
+#
+# The project is the git root of the current directory (or the directory itself). The file is
+# <project>/.controlroom/NOTES.md — plain Markdown you can also edit by hand.
+# Keep it short: it is loaded into context at every session start. Past ~40 lines, prune.
+set -euo pipefail
+
+root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
+FILE="${CR_NOTES_FILE:-$(root)/.controlroom/NOTES.md}"
+WHO="${SLOG_TAG:-$( [ -n "${TMUX:-}" ] && tmux display-message -p '#S' 2>/dev/null || echo "$USER")}"
+
+ensure() {
+  [ -f "$FILE" ] && return
+  mkdir -p "$(dirname "$FILE")"
+  printf '# Project notes — done / next / don'"'"'t redo (cr-notes)\n\n' > "$FILE"
+}
+# same write discipline as slog: one writer at a time, atomic replace
+locked() { mkdir -p "$(dirname "$FILE")"; exec 9>"$FILE.lock"; flock -w 10 9 || { echo "cr-notes: busy" >&2; exit 1; }; }
+
+add() {
+  local kind="$1"; shift
+  [ -n "${*:-}" ] || { echo "usage: cr-notes $kind \"text\"" >&2; exit 2; }
+  locked; ensure
+  printf -- '- %s %s — %s (%s)\n' "$kind" "$*" "$(date '+%Y-%m-%d')" "$WHO" >> "$FILE"
+  echo "📝 $kind: $*"
+}
+
+case "${1:-show}" in
+  done|next|dont) k="$1"; shift; add "$(printf '%s' "$k" | tr a-z A-Z)" "$@";;
+  show) [ -f "$FILE" ] || { echo "(no notes yet — cr-notes done|next|dont \"...\")"; exit 0; }
+        grep -n '^- ' "$FILE" | sed -E 's/^([0-9]+):- /\1  /' || echo "(empty)";;
+  drop) n="${2:?usage: cr-notes drop <line number from show>}"; locked; ensure
+        case "$n" in *[!0-9]*) echo "not a number: $n" >&2; exit 2;; esac
+        line=$(sed -n "${n}p" "$FILE"); case "$line" in '- '*) ;; *) echo "line $n is not a note" >&2; exit 2;; esac
+        TMP=$(mktemp "$FILE.tmp.XXXX"); sed "${n}d" "$FILE" > "$TMP"; mv "$TMP" "$FILE"
+        echo "🗑  dropped: ${line#- }";;
+  path) echo "$FILE";;
+  -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//';;
+  *) echo "unknown: $1 (try: cr-notes help)" >&2; exit 2;;
+esac

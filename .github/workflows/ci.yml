@@ -16,11 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: bash syntax + shellcheck
         run: |
-          files="install.sh start.sh bin/cr-clip bin/cr-expose bin/cr-session bin/skill-new bin/slog .devcontainer/setup.sh .devcontainer/start-bg.sh"
+          files="install.sh start.sh bin/cr-clip bin/cr-expose bin/cr-session bin/cr-cc bin/cr-exclusive bin/cr-hist bin/cr-notes bin/skill-new bin/slog tests/run.sh .devcontainer/setup.sh .devcontainer/start-bg.sh"
           for f in $files; do bash -n "$f"; done
           shellcheck --severity=error $files
       - name: python compiles
-        run: python3 -m py_compile server/server.py hooks/cr-state-hook.py bin/skill-lint
+        run: python3 -m py_compile server/server.py hooks/cr-state-hook.py hooks/cr-guard-hook.py hooks/cr-context-hook.py hooks/cr-history-hook.py bin/skill-lint
       - name: skill-lint on the bundled skills
         run: python3 bin/skill-lint skills
 
@@ -50,3 +50,5 @@ jobs:
           SLOG_TAG=bob   bin/slog take api 2>&1 | tee out.txt
           grep -qi 'overlap\|conflict\|held' out.txt
           bin/slog locks
+      - name: behavior tests (lock guard, context hook, notes, exclusive, history, permission badge)
+        run: bash tests/run.sh

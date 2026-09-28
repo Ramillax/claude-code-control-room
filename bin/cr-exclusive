@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# cr-exclusive — run a command while holding a HARD lock on a named resource.
+#
+#   cr-exclusive browser -- ./screenshot.sh https://example.com
+#   cr-exclusive -w 0 browser -- ./fill-form.sh        # don't wait: fail at once if busy
+#
+# For short-lived things two sessions must never use at the same time: one logged-in browser
+# profile, a device, a port, a CLI that keeps local state. slog locks are advisory and meant for
+# work that takes minutes to hours; this is for a single command.
+#
+# Why a hard lock is fine HERE when slog's are advisory: this is a kernel flock held by the
+# running process. If the session crashes, the process dies and the lock goes with it — there is
+# no stale lock to clean up, which is the usual reason hard locks turn into a nuisance.
+#
+# While waiting it prints who holds the resource. Exit code: the command's, or 75 (EX_TEMPFAIL)
+# if the lock could not be taken within the wait (default 120 s, -w seconds to change it).
+set -uo pipefail
+
+WAIT=120
+[ "${1:-}" = "-w" ] && { WAIT="${2:?-w needs seconds}"; shift 2; }
+RES="${1:-}"; shift || true
+[ "${1:-}" = "--" ] && shift
+if [ -z "$RES" ] || [ $# -eq 0 ]; then
+  echo "usage: cr-exclusive [-w seconds] <resource> -- <command> [args...]" >&2; exit 2
+fi
+case "$RES" in *[!A-Za-z0-9._:-]*) echo "cr-exclusive: resource names are [A-Za-z0-9._:-]" >&2; exit 2;; esac
+
+DIR="${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}/exclusive"
+mkdir -p "$DIR"
+LOCK="$DIR/$RES.lock"
+WHO="${SLOG_TAG:-$( [ -n "${TMUX:-}" ] && tmux display-message -p '#S' 2>/dev/null || echo "pid$$")}"
+
+exec 9>>"$LOCK"
+if ! flock -n 9; then
+  echo "⏳ '$RES' is in use by: $(cat "$DIR/$RES.owner" 2>/dev/null || echo '?') — waiting up to ${WAIT}s" >&2
+  flock -w "$WAIT" 9 || { echo "cr-exclusive: '$RES' still busy after ${WAIT}s" >&2; exit 75; }
+fi
+echo "$WHO (pid $$, since $(date '+%H:%M:%S')): $*" > "$DIR/$RES.owner"
+# The command inherits fd 9 on purpose: if this wrapper is killed but the command keeps running,
+# the resource is still in use, so the lock must live until the command itself is gone.
+"$@"
+rc=$?
+rm -f "$DIR/$RES.owner"
+exit $rc

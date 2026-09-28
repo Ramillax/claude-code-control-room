@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# cr-hist — "what changed, when, and from which session", for a project several sessions edit.
+#
+#   cr-hist init [dir]           start recording history for a project (default: git root or cwd)
+#   cr-hist changed [hours]      what OTHER sessions changed lately (default 24h)   ← start here
+#   cr-hist who <path>           a file's history: hash · when · session · transcript id
+#   cr-hist diff <path> [n]      the n-th change back to that file (default 1), capped at 200 lines
+#   cr-hist prev <path> <out>    the file as it was BEFORE its last change → <out> (to compare or revert)
+#   cr-hist session <id-prefix>  everything one Claude session changed (id from the board's s: stamp)
+#   cr-hist repos                projects being recorded
+#
+# How it records: hooks/cr-history-hook.py commits every file a session writes, ONE FILE PER
+# COMMIT, labeled with the tmux session name and the Claude Code session id (= transcript name).
+# One file per commit, never `git add -A`, because several sessions write in parallel: a global
+# add would glue another session's half-finished work into your commit.
+#
+# Where: a SHADOW repository in <project>/.controlroom/history.git with the project as its work
+# tree. Your project's own .git (if any) is never touched: no commits on your branch, nothing to
+# push. Your .gitignore is respected. Delete .controlroom/history.git to drop the history.
+#
+# Attribution limit, stated plainly: Edit/Write tell the hook exactly which file was written.
+# Bash doesn't, so after a Bash call the hook sweeps the project and commits whatever changed,
+# marked `<session>/bash`: that means "some session wrote this via the shell", not necessarily
+# that one. A misattributed commit beats a silent gap; nothing is ever lost.
+set -euo pipefail
+
+STATE="${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}"
+REG="$STATE/hist-repos"
+MAX_INIT_FILES="${CR_HIST_MAX_FILES:-5000}"
+
+root_of() { local d; d=$(realpath "${1:-$PWD}"); git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "$d"; }
+# the recorded project that contains $PWD (walks up to the first .controlroom/history.git)
+find_repo() {
+  local d; d=$(realpath "$PWD")
+  while :; do
+    [ -d "$d/.controlroom/history.git" ] && { echo "$d"; return; }
+    [ "$d" = / ] && break; d=$(dirname "$d")
+  done
+  echo "cr-hist: no recorded project here (run: cr-hist init)" >&2; exit 1
+}
+H() { git --git-dir="$W/.controlroom/history.git" --work-tree="$W" "$@"; }
+FMT='%h  %ad  %s'
+pretty() { sed -E 's/auto\(([^)]*)\): /\1  /'; }
+
+CMD="${1:-changed}"; shift || true
+case "$CMD" in
+  init)
+    W=$(root_of "${1:-}")
+    G="$W/.controlroom/history.git"
+    [ -d "$G" ] && { echo "already recording: $W"; exit 0; }
+    n=$(git -C "$W" ls-files -co --exclude-standard 2>/dev/null | wc -l || true)
+    [ "${n:-0}" -eq 0 ] && n=$(find "$W" -type f -not -path '*/.git/*' -not -path '*/.controlroom/*' | head -n $((MAX_INIT_FILES+1)) | wc -l)
+    if [ "$n" -gt "$MAX_INIT_FILES" ] && [ "${2:-}" != "--force" ]; then
+      echo "cr-hist: $W has $n files (> $MAX_INIT_FILES). Add a .gitignore for build/vendor dirs, or: cr-hist init '$W' --force" >&2; exit 2
+    fi
+    git init -q --bare "$G"
+    git --git-dir="$G" config core.bare false
+    git --git-dir="$G" config core.worktree "$W"
+    git --git-dir="$G" config user.name "controlroom"
+    git --git-dir="$G" config user.email "controlroom@localhost.invalid"
+    git --git-dir="$G" config commit.gpgsign false
+    git --git-dir="$G" config core.hooksPath /dev/null      # your git hooks are for YOUR repo, not this one
+    git --git-dir="$G" config gc.auto 256
+    mkdir -p "$G/info"; printf '/.git/\n/.controlroom/\n' > "$G/info/exclude"
+    W="$W"; H add -A >/dev/null 2>&1 || true
+    H commit -q -m "baseline: history starts here" --allow-empty
+    mkdir -p "$STATE"; touch "$REG"
+    grep -qxF "$W" "$REG" || echo "$W" >> "$REG"
+    echo "📚 recording history for $W  ($(H ls-files | wc -l) files in the baseline)"
+    ;;
+  changed)
+    W=$(find_repo); hours="${1:-24}"
+    me="${SLOG_TAG:-$( [ -n "${TMUX:-}" ] && tmux display-message -p '#S' 2>/dev/null || echo '')}"
+    out=$(H log --since="$hours hours ago" --date=format:'%m-%d %H:%M' --format="$FMT" | grep -v '  baseline:' | pretty || true)
+    [ -n "$me" ] && out=$(printf '%s\n' "$out" | grep -vE "  $me(/bash)?  " || true)
+    if [ -z "$out" ]; then echo "(nothing changed by other sessions in the last ${hours}h)"; else printf '%s\n' "$out" | head -n 60; fi
+    ;;
+  who)
+    W=$(find_repo); f="${1:?usage: cr-hist who <path>}"
+    H log --follow --date=format:'%m-%d %H:%M' --format="%h  %ad  %s  %(trailers:key=Session,valueonly,separator=)" -- "$f" \
+      | pretty | sed -E 's/  ([0-9a-f]{8})[0-9a-f-]{28}$/  s:\1…/' | head -n 40
+    ;;
+  diff)
+    W=$(find_repo); f="${1:?usage: cr-hist diff <path> [n]}"; n="${2:-1}"
+    rev=$(H log --format=%h -n "$n" -- "$f" | tail -n 1)
+    [ -n "$rev" ] || { echo "no history for $f" >&2; exit 1; }
+    H show --patch-with-stat --format='%h  %ad  %s%n%(trailers:key=Session)' --date=format:'%Y-%m-%d %H:%M' "$rev" -- "$f" | head -n 200
+    ;;
+  prev)
+    W=$(find_repo); f="${1:?usage: cr-hist prev <path> <out>}"; out="${2:?usage: cr-hist prev <path> <out>}"
+    rev=$(H log --format=%h -n 1 -- "$f")
+    [ -n "$rev" ] || { echo "no history for $f" >&2; exit 1; }
+    rel=$(realpath --relative-to="$W" "$(realpath -m "$f")")
+    H show "$rev~1:$rel" > "$out" 2>/dev/null || { echo "$f did not exist before $rev" >&2; rm -f "$out"; exit 1; }
+    echo "$out  ← $f as of before $rev  (md5 $(md5sum < "$out" | cut -c1-32))"
+    ;;
+  session)
+    W=$(find_repo); s="${1:?usage: cr-hist session <session-id or its first 8 chars>}"
+    H log --date=format:'%m-%d %H:%M' --format="$FMT" --grep="^Session: $s" | pretty | head -n 100
+    ;;
+  repos) [ -f "$REG" ] && cat "$REG" || echo "(none: cr-hist init)";;
+  -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//';;
+  *) echo "unknown: $CMD (try: cr-hist help)" >&2; exit 2;;
+esac

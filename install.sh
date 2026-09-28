@@ -4,7 +4,8 @@
 #   ./install.sh                         check dependencies + create controlroom.env
 #   ./install.sh --workdir ~/myproject   …and point new sessions at your project
 #   ./install.sh --all                   …plus the three optional steps below
-#     --hooks    add the state hook to ~/.claude/settings.json  (backup: settings.json.bak-<date>)
+#     --hooks    add the hooks (state, lock guard, session context, history) to ~/.claude/settings.json
+#                (backup: settings.json.bak-<date>)
 #     --skills   install the skill-sync skill into ~/.claude/skills/
 #     --tmux     append the recommended settings to ~/.tmux.conf (once, between markers)
 #
@@ -65,10 +66,10 @@ fi
 chmod +x "$HERE"/bin/* "$HERE/start.sh"
 
 if [ "$DO_HOOKS" = 1 ]; then
-  echo "3. Claude Code state hook"
-  python3 - "$HERE/hooks/cr-state-hook.py" <<'EOF'
+  echo "3. Claude Code hooks (state, guard, context, history)"
+  python3 - "$HERE/hooks" <<'EOF'
 import json, os, shutil, sys, time
-hook = sys.argv[1]
+hooks_dir = sys.argv[1]
 path = os.path.expanduser("~/.claude/settings.json")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 data = {}
@@ -76,24 +77,32 @@ if os.path.exists(path):
     with open(path) as fh:
         data = json.load(fh)                      # invalid JSON → abort loudly, change nothing
     shutil.copy2(path, path + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
-cmd = "python3 " + hook
+# (script, event, matcher)
+WANT = [("cr-state-hook.py", ev, "*" if ev in ("PreToolUse", "PostToolUse") else None)
+        for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                   "Notification", "Stop", "SessionEnd")]
+WANT += [("cr-guard-hook.py", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash"),
+         ("cr-context-hook.py", "SessionStart", None),
+         ("cr-context-hook.py", "SessionEnd", None),
+         ("cr-history-hook.py", "PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash")]
 hooks = data.setdefault("hooks", {})
 added = 0
-for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"):
+for script, ev, matcher in WANT:
     groups = hooks.setdefault(ev, [])
-    if any("cr-state-hook.py" in h.get("command", "") for g in groups for h in g.get("hooks", [])):
+    if any(script in h.get("command", "") for g in groups for h in g.get("hooks", [])):
         continue
-    g = {"hooks": [{"type": "command", "command": cmd}]}
-    if ev in ("PreToolUse", "PostToolUse"):
-        g["matcher"] = "*"
+    g = {"hooks": [{"type": "command", "command": "python3 " + os.path.join(hooks_dir, script)}]}
+    if matcher:
+        g["matcher"] = matcher
     groups.append(g)
     added += 1
 with open(path, "w") as fh:
     json.dump(data, fh, indent=2)
     fh.write("\n")
-print("  \033[32m✔\033[0m %s: %s" % (path, ("added %d hook events" % added) if added else "already installed"))
+print("  \033[32m✔\033[0m %s: %s" % (path, ("added %d hook entries" % added) if added else "already installed"))
 EOF
-  info "restart running Claude sessions to pick up the hook"
+  info "restart running Claude sessions to pick up the hooks"
+  info "history is opt-in per project: run  cr-hist init  inside a project to start recording it"
 fi
 
 if [ "$DO_SKILLS" = 1 ]; then
@@ -126,5 +135,5 @@ Ready. Next:
   3. ./start.sh   →  http://127.0.0.1:7680
   4. Before using it from another device, read README → Security. It has NO authentication.
 EOF
-[ "$DO_HOOKS$DO_SKILLS$DO_TMUX" = "000" ] && echo "  (optional: ./install.sh --all  adds the state hook, the skill-sync skill and the tmux settings)"
+[ "$DO_HOOKS$DO_SKILLS$DO_TMUX" = "000" ] && echo "  (optional: ./install.sh --all  adds the hooks, the skill-sync skill and the tmux settings)"
 exit 0

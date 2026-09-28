@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# cr-cc — the control room from a terminal: see every session, read one, answer one.
+#
+#   cr-cc                       dashboard: state · mode · locks · what it's waiting for (one shot)
+#   cr-cc mon --watch [secs]    …refreshing (default every 3 s; Ctrl-C to quit)
+#   cr-cc peek <session> [n]    the last n non-empty lines of a session's screen (default 40)
+#   cr-cc reply <session> TEXT  type TEXT into that session and press Enter
+#   cr-cc reply <session> --enter     press Enter only (e.g. accept the highlighted option)
+#
+# For when you're on SSH without the web panel, and for agents: a Claude session can run
+# `cr-cc` to see which of its siblings is blocked and `cr-cc peek claude2` to read what it's
+# asking. `reply` is the only write, it goes to ONE session you name, and it is meant for YOU:
+# an agent answering another agent's permission prompt defeats the point of the prompt. The
+# CLAUDE.md snippet tells agents not to use it unless you ask.
+#
+# State comes from the hook (hooks/cr-state-hook.py). A session answered with "no" or Esc has
+# no hook event, so if the hook says "waiting" but the permission box is no longer on screen
+# (and the hook event is more than a few seconds old) it shows as idle. Without hooks installed,
+# the state is guessed from the screen: that works, but breaks when Claude Code's UI changes.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+[ -f "${CR_CONFIG:-$HERE/controlroom.env}" ] && . "${CR_CONFIG:-$HERE/controlroom.env}"
+SESSIONS="${CR_SESSIONS:-claude1 claude2 claude3 claude4 shell}"
+SHELLS="${CR_SHELL_SESSIONS:-shell}"
+STATE="${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}"
+TMUX_CMD=(tmux); [ -n "${CR_TMUX_SOCKET:-}" ] && TMUX_CMD=(tmux -L "$CR_TMUX_SOCKET")
+t() { "${TMUX_CMD[@]}" "$@"; }
+
+# Claude Code v2.x screen patterns (only used as a fallback / to confirm the hook)
+RE_BOX='Do you want to proceed\?|No, and tell Claude what to do|Do you trust the files|❯ 1\.'
+RE_WORK='esc to interrupt'
+GRACE=5
+
+allowed() { local s; for s in $SESSIONS; do [ "$s" = "$1" ] && return 0; done; return 1; }
+screen()  { t capture-pane -p -t "=$1:" 2>/dev/null; }
+bottom()  { screen "$1" | grep -v '^[[:space:]]*$' | tail -n 12; }   # the box is drawn at the bottom
+
+classify() {   # prints: state|mode|detail
+  local s="$1" cap st="" ts=0 mode detail="" now
+  cap=$(screen "$s") || { echo "off|-|"; return; }
+  if   grep -q 'auto mode on'    <<<"$cap"; then mode=auto
+  elif grep -q 'accept edits on' <<<"$cap"; then mode=accept-edits
+  elif grep -q 'plan mode on'    <<<"$cap"; then mode=plan
+  elif grep -qE 'Claude Code|\? for shortcuts|esc to interrupt' <<<"$cap"; then mode=normal
+  else mode=-; fi
+  if [ -f "$STATE/state/$s.json" ]; then
+    read -r st ts < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("state",""), d.get("ts",0))' "$STATE/state/$s.json" 2>/dev/null) || true
+  fi
+  now=$(date +%s)
+  if [ -n "$st" ]; then
+    if [ "$st" = blocked ] && ! bottom "$s" | grep -qE "$RE_BOX" && [ $((now - ${ts:-0})) -gt $GRACE ]; then
+      st=idle; detail="(answered — no hook fires on a no/Esc)"
+    fi
+  else                                  # no hook data: guess from the screen
+    if   bottom "$s" | grep -qE "$RE_BOX"; then st=blocked
+    elif grep -q "$RE_WORK" <<<"$cap"; then st=working
+    elif grep -qE 'Claude Code|\? for shortcuts' <<<"$cap"; then st=idle
+    else st=shell; fi
+    detail="${detail:-(from screen: no hook data)}"
+  fi
+  if [ "$st" = blocked ]; then
+    detail=$(bottom "$s" | grep -E 'Do you want|Do you trust|Would you like' | tail -n 1 | sed 's/^[[:space:]│]*//; s/[[:space:]│]*$//')
+    detail="${detail:-waiting for your permission}"
+  fi
+  printf '%s|%s|%s\n' "$st" "$mode" "$detail"
+}
+
+locks_of() { "$HERE/bin/slog" locks 2>/dev/null | awk -F'\t' -v s="$1" '$2==s {printf "%s%s ", $1, ($4=="stale"?"(stale)":"")}'; }
+
+mon_once() {
+  local live s st mode detail me
+  live=" $(t list-sessions -F '#S' 2>/dev/null | tr '\n' ' ') "
+  me=$( [ -n "${TMUX:-}" ] && tmux display-message -p '#S' 2>/dev/null || true)
+  printf '%-10s %-9s %-13s %-24s %s\n' SESSION STATE MODE LOCKS DETAIL
+  for s in $SESSIONS; do
+    if [[ "$live" != *" $s "* ]]; then printf '%-10s %-9s\n' "$s" "off"; continue; fi
+    if [[ " $SHELLS " == *" $s "* ]]; then printf '%-10s %-9s\n' "$s" "shell"; continue; fi
+    IFS='|' read -r st mode detail <<<"$(classify "$s")"
+    [ "$st" = blocked ] && st=BLOCKED      # plain text on purpose: emoji widths break the columns
+    [ "$s" = "$me" ] && detail="(this session) $detail"
+    printf '%-10s %-9s %-13s %-24s %s\n' "$s" "$st" "$mode" "$(locks_of "$s")" "$detail"
+  done
+}
+
+need_session() {
+  local s="${1:-}"
+  [ -n "$s" ] || { echo "which session? (one of: $SESSIONS)" >&2; exit 2; }
+  allowed "$s" || { echo "not in CR_SESSIONS: $s" >&2; exit 2; }
+  t has-session -t "=$s" 2>/dev/null || { echo "session not running: $s" >&2; exit 1; }
+}
+
+case "${1:-mon}" in
+  mon)
+    if [ "${2:-}" = "--watch" ]; then
+      secs="${3:-3}"; trap 'exit 0' INT
+      while :; do clear; echo "cr-cc · $(date '+%H:%M:%S') · Ctrl-C to quit"; echo; mon_once; sleep "$secs"; done
+    else mon_once; fi;;
+  peek)
+    need_session "${2:-}"; screen "$2" | grep -v '^[[:space:]]*$' | tail -n "${3:-40}";;
+  reply)
+    need_session "${2:-}"; s="$2"; shift 2
+    if [ "${1:-}" = "--enter" ]; then echo "→ [$s] <Enter>"
+    else
+      [ $# -gt 0 ] || { echo "usage: cr-cc reply <session> TEXT   (or --enter)" >&2; exit 2; }
+      text="$*"
+      case "$text" in *$'\n'*) echo "one line only: a newline would submit early" >&2; exit 2;; esac
+      echo "→ [$s] $text"; t send-keys -t "=$s:" -l "$text"
+    fi
+    t send-keys -t "=$s:" Enter;;
+  -h|--help|help) sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//';;
+  *) echo "unknown: $1 (try: cr-cc help)" >&2; exit 2;;
+esac

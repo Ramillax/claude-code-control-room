@@ -15,13 +15,15 @@ Three layers, one idea: **several agents working on the same project without ste
 | Layer | Answers | Lives in |
 |---|---|---|
 | **See** | what is each session doing right now, which one needs me? | the web grid + Claude Code hooks |
-| **Coordinate** | who is touching what, right now? | `slog`: a live board with locks (ephemeral) |
+| **Coordinate** | who is touching what, right now? who changed what, and from which session? | `slog`: a live board with locks (ephemeral) · `cr-hist`: per-session file history |
 | **Remember** | what did we learn, and why did we decide it? | skills in 3 layers + `skill-sync` (durable) |
 
 What you get:
 
-- **Live state per session**: working, idle, or **waiting for your permission**. It comes from Claude Code's own hook events, not from screen-scraping, so it doesn't break when the CLI's UI changes. A red badge in the top bar takes you straight to the session that needs you.
-- **`slog`, a shared board with hierarchical advisory locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds.
+- **Live state per session**: working, idle, or **waiting for your permission**. It comes from Claude Code's own hook events, not from screen-scraping, so it doesn't break when the CLI's UI changes. A red badge in the top bar takes you straight to the session that needs you, and it clears whether you answer yes, no or Esc (no hook fires on a "no", so the server confirms it on screen; see [below](#the-permission-badge-and-the-no-case)).
+- **`slog`, a shared board with hierarchical locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds. Locks are advisory by default; tie one to files with `--paths` and a hook **enforces** it: other sessions get their edits to those files denied.
+- **Every session starts informed**: a SessionStart hook injects the live locks, the recent feed, the files other sessions just changed and the project's notes (done / next / don't redo) into each new session, also after `/clear` and compaction. Nobody has to remember to run `slog status`.
+- **History by session**: every file a session writes is committed on its own, labeled with the session and its transcript id, in a shadow git repo that never touches your project's `.git`. `cr-hist changed` answers "what did the other sessions change?", `cr-hist who <file>` leads to the conversation that made a change.
 - **Built for the phone**: an on-screen key bar (Esc, arrows, Tab, Ctrl-C…), swipe to scroll history, tap-to-jump between sessions.
 - **Files both ways**: upload, drag & drop, or **paste a screenshot with Ctrl-V**. The path gets typed into the session's prompt. The download dialog opens on an outbox where agents drop things for you.
 - **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap. On a phone this is *the* way to copy: selecting text inside a terminal doesn't work well there.
@@ -85,7 +87,7 @@ Ctrl-C stops the UI. **Your sessions keep running in tmux**: closing the browser
 
 It never downloads anything and never needs sudo. Every step backs up what it edits and is safe to run again. Without `--all` it only checks dependencies and creates `controlroom.env`. The optional parts:
 
-- `--hooks` adds the state hook to `~/.claude/settings.json` (keeps your existing settings). Without it the tiles still work, but their state dot stays grey. Restart running sessions after adding it.
+- `--hooks` adds four hooks to `~/.claude/settings.json` (keeps your existing settings, backs the file up): the state hook (tile dots and the permission badge), the lock guard (enforces `slog take --paths`), the context hook (board + notes into every new session; releases your locks when the session ends) and the history hook (records each file a session writes, only in projects where you ran `cr-hist init`). Without them the tiles still work, but their state dot stays grey. Restart running sessions after adding them.
 - `--skills` installs the `skill-sync` skill into `~/.claude/skills/`.
 - `--tmux` appends `examples/tmux.conf` to `~/.tmux.conf`: mouse/swipe scrolling, copying a mouse selection to your clipboard on desktop, and it disables tmux's right-click menu, whose "Kill" item used to kill sessions on a stray tap.
 - `--workdir` is the folder new sessions start in (your project).
@@ -163,6 +165,85 @@ slog done                            # end of session: removes YOUR lines, never
 - **Aliases**: map long IDs to readable names in `slog-aliases` (`billing=wf_8f3kQ2`) and both spellings lock the same key.
 - `slog locks` prints TSV, which is what the UI reads.
 
+### From advisory to enforced
+
+An advisory lock only holds while every session reads the board and chooses to respect it. Three hooks take the "chooses" out of the parts where it matters:
+
+```bash
+slog take "api:auth" --paths 'src/auth/*,docs/auth.md'   # lock + the files it covers
+```
+
+- **`hooks/cr-guard-hook.py`** (PreToolUse). While you hold that lock, any **other** session that tries `Edit`/`Write` on those files gets the call **denied**, with who holds it and what to do. Shell writes (`> file`, `tee`, `sed -i`, `mv`/`cp`/`rm`) are checked too, but that part is best effort: a script that writes the file from the inside isn't detected. It stops accidents, not a session determined to get around it. It also refuses direct writes to the board itself, so the only write path is `slog` (flock + atomic replace).
+- **`hooks/cr-context-hook.py`** (SessionStart / SessionEnd). Every new session, and every session after `/clear` or compaction, starts with the live locks, the recent feed and the project notes already in its context. When a session exits, its locks are released.
+- **Stale locks are never enforced.** If a session crashes, its lock turns ⚠stale after `SLOG_STALE_HOURS` (default 4) and stops blocking anyone. A hard lock left behind by a dead session is worse than the odd warning.
+
+### Project notes: done / next / don't redo
+
+The board is per session and ephemeral. `cr-notes` is per project and durable, for one specific failure: a session after compaction redoing work that is already finished, or reopening a decision that was already made.
+
+```bash
+cr-notes done "migrated users to v2"
+cr-notes next "backfill created_at"
+cr-notes dont "don't bump postgres to 17: breaks the extension"
+cr-notes show        # numbered;  cr-notes drop <n> to remove one
+```
+
+It lives in `<project>/.controlroom/NOTES.md` (plain Markdown, edit it by hand if you like) and the context hook loads it into every new session. Keep it short.
+
+### Exclusive resources: `cr-exclusive`
+
+Some things can't be shared even for a minute: one logged-in browser profile, a device, a CLI that keeps local state. Two sessions driving the same browser, one navigating while the other fills a form, produce garbage.
+
+```bash
+cr-exclusive browser -- ./screenshot.sh https://example.com   # waits up to 120 s if busy
+cr-exclusive -w 0 browser -- ./fill-form.sh                    # fail at once (exit 75)
+```
+
+This one *is* a hard lock, and that's fine here: it's a kernel `flock` held by the running command. If the session crashes, the lock dies with the process, so there's nothing stale to clean up.
+
+### History: what changed, when, and from which session
+
+With several sessions editing one project, "who changed this, and why?" gets hard fast, and your own git history doesn't help: nobody commits every edit, and a global `git add -A` would mix sessions' half-finished work together.
+
+```bash
+cr-hist init                 # start recording this project (opt-in, once)
+cr-hist changed 6            # what OTHER sessions changed in the last 6 hours
+cr-hist who src/app.py       # hash · when · session · transcript id, per change
+cr-hist diff src/app.py 2    # the second-to-last change to that file
+cr-hist prev src/app.py /tmp/app.before.py   # the file as it was before its last change
+cr-hist session 3f9c2a1b     # everything one Claude session changed
+```
+
+- **One file per commit.** `hooks/cr-history-hook.py` commits exactly the file an `Edit`/`Write` touched, attributed to that session. After a `Bash` call it sweeps the project and commits whatever changed, marked `<session>/bash`: the shell doesn't say what it wrote, so that attribution is best effort. A misattributed commit beats a silent gap.
+- **Traceable to the conversation.** Each commit carries a `Session:` trailer with the Claude Code session id, which is the transcript's file name. Same idea as the board's `s:` stamp.
+- **Out of your way.** The history is a shadow repository in `.controlroom/history.git` whose work tree is your project. Your `.git`, your branch and your remote never see it. Your `.gitignore` is respected, and deleting that folder drops the history.
+
+### From a terminal: `cr-cc`
+
+The same view without a browser (over SSH, or for an agent that wants to know what its siblings are doing):
+
+```bash
+cr-cc                        # every session: state · mode · locks · what it's waiting for
+cr-cc mon --watch            # …refreshing every 3 s
+cr-cc peek claude2           # the last 40 lines of that session's screen
+cr-cc reply claude2 "use the staging DB instead"   # type an answer and press Enter
+cr-cc reply claude2 --enter  # just Enter (accept the highlighted option)
+```
+
+```
+SESSION    STATE     MODE          LOCKS                    DETAIL
+claude1    BLOCKED   normal                                 Do you want to proceed?
+claude2    working   auto          api:auth
+claude3    idle      normal                                 (answered — no hook fires on a no/Esc)
+shell      shell
+```
+
+`reply` is the only command that writes, it only reaches sessions in `CR_SESSIONS`, and it is for **you**: an agent approving another agent's permission prompt defeats the prompt. The CLAUDE.md snippet tells agents to look (`cr-cc`, `peek`) but not to answer unless you ask them to.
+
+### The permission badge and the "no" case
+
+A "yes" to a permission prompt runs the tool and fires `PostToolUse`, which clears the badge. A "no", Esc or Ctrl-C fires **no hook at all** (`PermissionDenied` exists, but only for auto-mode classifier denials), so a hook-only badge stays red until your next prompt. The server closes that gap by looking at the session's pane: once it has seen the permission box on screen for the current prompt, the box disappearing means you answered. The screen is only used to *leave* the waiting state, never to enter it, and only after it has confirmed the box once, so if a Claude Code update changes how the box looks, you're simply back to hook-only behavior instead of missing an alert.
+
 ## Skills: knowledge that survives the session
 
 The board is ephemeral on purpose. What a session *learned* (how a subsystem really works, why a decision was made, which trap it fell into) has to land somewhere durable before the session closes, or the next one starts cold and re-discovers it. With several sessions writing that knowledge in parallel, it rots fast unless there are rules. These rules come from real incidents:
@@ -170,7 +251,7 @@ The board is ephemeral on purpose. What a session *learned* (how a subsystem rea
 - A reference said one version of a component while production ran another. Sessions trusted the doc and built on it, and the error cascaded. → **snapshot vs pointer**: never copy live values; write where they live and how to read them.
 - Two sessions read the same highest changelog id and both used it. → `skill-lint` flags duplicate ids.
 - Dozens of cross-references broke after files were renamed. → `skill-lint` flags pointers to missing files.
-- A session "cleaned up" the shared board and deleted another session's live lock. → `slog done` only ever removes your own lines.
+- A session "cleaned up" the shared board and deleted another session's live lock. → `slog done` only ever removes your own lines, and the guard hook refuses direct writes to the board.
 
 **The structure** (create one with `skill-new <name>`):
 
@@ -241,13 +322,21 @@ install.sh                 one-step setup (idempotent, backs up what it edits)
 start.sh                   runs ttyd + the server in the foreground
 controlroom.env.example    every setting, commented
 bin/
-  slog                     live board + hierarchical advisory locks
+  slog                     live board + hierarchical locks (advisory, or enforced with --paths)
+  cr-notes                 per-project notes: done / next / don't redo
+  cr-exclusive             hard lock around one command (browser profile, device…)
+  cr-hist                  per-session file history (what changed, when, which session)
+  cr-cc                    the dashboard in a terminal: state, mode, locks; peek / reply
   cr-session               what each terminal tile runs (session allowlist, tmux attach-or-create)
   cr-clip / cr-expose      hand text / files to the human
   skill-new / skill-lint   scaffold and check skills
 server/server.py           UI, /tty proxy, status API, files, dictation (Python stdlib only)
 web/index.html             the grid (one file, no build)
 hooks/cr-state-hook.py     Claude Code hook → per-session state
+hooks/cr-guard-hook.py     denies edits to files another session has locked
+hooks/cr-context-hook.py   board + notes + recent changes into every new session; frees locks on exit
+hooks/cr-history-hook.py   commits each file a session writes into the project's history
+tests/run.sh               behavior tests (run in CI)
 skills/                    skill-sync + the 3-layer template
 examples/                  CLAUDE.md snippet, hooks JSON, tmux.conf, systemd units
 .devcontainer/             one-click GitHub Codespaces setup
@@ -261,6 +350,7 @@ examples/                  CLAUDE.md snippet, hooks JSON, tmux.conf, systemd uni
                                    ├─ /            grid UI (web/index.html)
                                    ├─ /tty/*  ───► ttyd (UNIX socket) ──► cr-session ──► tmux ──► claude
                                    ├─ /api/status ◄─ state/<session>.json ◄── cr-state-hook.py (Claude Code hooks)
+                                   │               ◄─ tmux capture-pane (only to confirm a pending permission)
                                    │               ◄─ slog locks + feed   ◄── SESSIONS.md ◄── slog (from any session)
                                    ├─ /upload /files /dl /rm   (.controlroom/uploads, outbox)
                                    ├─ /clip.txt   ◄── cr-clip
@@ -289,8 +379,9 @@ All settings live in `controlroom.env` (see `controlroom.env.example`, where eve
 
 - Linux only. This release was tested with tmux 3.4, ttyd 1.7.4 and Python 3.12. The UI comes from a panel used daily on desktop Chrome and Android browsers; iOS Safari is untested.
 - Single user by design: whoever passes your auth proxy is you.
-- Locks are advisory. They coordinate cooperative agents; they don't enforce anything.
-- The state dot reflects the last hook event. A session that was killed abruptly can show a stale state until its tmux session is gone (then it shows "off").
+- Locks are advisory unless taken with `--paths`, and even then only file edits are enforced exactly. Shell writes are checked best effort, and anything outside the filesystem (a database, a remote API) is only as safe as the agents' cooperation. For those, put a compare-and-swap in the write path itself.
+- The state dot reflects the last hook event (plus the on-screen check for a pending permission). A session that was killed abruptly can show a stale state until its tmux session is gone (then it shows "off").
+- The "no" case of the permission badge is detected when the panel polls. If you answer before any poll has seen the prompt (nobody had the panel open), the badge behaves as before and clears on your next prompt.
 
 ## Contributing
 

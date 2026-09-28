@@ -7,10 +7,13 @@
 #
 #   slog "free text"             append a line to the feed (what this session is doing)
 #   slog take <resource> [note]  take an advisory lock; warns if it OVERLAPS another session's lock
+#   slog take <res> --paths 'src/auth/*,docs/auth.md' [note]
+#                                …and tie it to files: with hooks/cr-guard-hook.py installed, OTHER
+#                                sessions get Edit/Write on those paths DENIED while you hold it
 #   slog free <resource> [note]  release it (prints how long you held it)
 #   slog status                  active locks + recent feed   <- run this BEFORE touching shared stuff
 #   slog tail [N]                last N raw lines (default 20)
-#   slog locks                   active locks as TSV: key, owner, since, flag (machine-readable)
+#   slog locks                   active locks as TSV: key, owner, since, flag (stale|-), paths (globs|-)
 #   slog done                    end of session: delete YOUR lines (keeps other sessions' lines)
 #   slog trim [days]             prune lines older than N days (default 2); `trim 0` wipes everything
 #
@@ -30,8 +33,10 @@
 # (or a take/free pair = a time window) can be traced back to the exact conversation that wrote it.
 # It cannot be reconstructed later — the transcript knows nothing about tmux — so it is stamped now.
 #
-# Locks are ADVISORY: nothing stops a session from ignoring them. They work because the
-# agent is told (in CLAUDE.md) to check `slog status` and `take` before touching shared things.
+# Locks are ADVISORY by default: they work because the agent is told (in CLAUDE.md) to check
+# `slog status` and `take` before touching shared things. A lock taken with --paths is ENFORCED
+# for file edits once hooks/cr-guard-hook.py is installed (Bash writes: best effort, see there).
+# Stale locks (older than SLOG_STALE_HOURS) are never enforced: a crashed session blocks nobody.
 set -euo pipefail
 
 BOARD="${SLOG_BOARD:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom/SESSIONS.md}"
@@ -90,29 +95,31 @@ append() {
   else                    printf '%s · %s · %s\n'        "$(ts)" "$TAG" "$1"          >> "$BOARD"; fi
 }
 
-# active_locks: current locks (last event per key is a TAKE). TSV: key owner since flag
+# active_locks: current locks (last event per key is a TAKE). TSV: key owner since flag paths
 active_locks() {
   ensure
   local now; now=$(date '+%s')
-  declare -A st owner whenv
-  local state key w t ck e flag
-  while IFS=$'\t' read -r state key w t; do
+  declare -A st owner whenv pathv
+  local state key w t p ck e flag
+  while IFS=$'\t' read -r state key w t p; do
     [ -z "${key:-}" ] && continue
     ck=$(canon "$key")
-    st[$ck]=$state; owner[$ck]=$w; whenv[$ck]=$t
+    st[$ck]=$state; owner[$ck]=$w; whenv[$ck]=$t; pathv[$ck]=${p:-}
   done < <(awk -F' · ' '
     function bracket(s){ if (match(s,/\[[^]]*\]/)) return substr(s,RSTART+1,RLENGTH-2); return "" }
+    function paths(s){ if (match(s,/\{paths:[^}]*\}/)) return substr(s,RSTART+7,RLENGTH-8); return "" }
     NF>=3 {
       msg=$3
-      if      (msg ~ /^🔒 TAKE /) { k=bracket(msg); if(k!="") printf "T\t%s\t%s\t%s\n",k,$2,$1 }
-      else if (msg ~ /^✅ FREE /) { k=bracket(msg); if(k!="") printf "F\t%s\t%s\t%s\n",k,$2,$1 }
+      if      (msg ~ /^🔒 TAKE /) { k=bracket(msg); if(k!="") printf "T\t%s\t%s\t%s\t%s\n",k,$2,$1,paths(msg) }
+      else if (msg ~ /^✅ FREE /) { k=bracket(msg); if(k!="") printf "F\t%s\t%s\t%s\t\n",k,$2,$1 }
     }' "$BOARD")
   [ -z "${st[*]+x}" ] && return 0   # empty array under `set -u`
   for ck in "${!st[@]}"; do
     [ "${st[$ck]}" = "T" ] || continue
     e=$(date -d "${whenv[$ck]}" +%s 2>/dev/null || echo 0)
-    flag=""; { [ "$e" -gt 0 ] && [ $((now-e)) -gt $((STALE_HOURS*3600)) ]; } && flag="stale"
-    printf '%s\t%s\t%s\t%s\n' "$ck" "${owner[$ck]}" "${whenv[$ck]}" "$flag"
+    # "-" and not "": read with IFS=$'\t' collapses empty fields (tab is IFS whitespace)
+    flag="-"; { [ "$e" -gt 0 ] && [ $((now-e)) -gt $((STALE_HOURS*3600)) ]; } && flag="stale"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ck" "${owner[$ck]}" "${whenv[$ck]}" "$flag" "${pathv[$ck]:--}"
   done
 }
 
@@ -132,26 +139,41 @@ CMD="${1:-status}"
 case "$CMD" in
   take)
     mutex
-    R=$(canon "${2:?usage: slog take <resource> [note]   (e.g. api   or   \"api:auth\")}"); shift 2 || true
+    R=$(canon "${2:?usage: slog take <resource> [--paths 'glob,glob'] [note]   (e.g. api   or   \"api:auth\")}"); shift 2 || true
+    PATHS=""
+    if [ "${1:-}" = "--paths" ]; then
+      [ -n "${2:-}" ] || { echo "usage: slog take <resource> --paths 'src/auth/*,docs/x.md' [note]" >&2; exit 2; }
+      # relative globs are anchored to where you took the lock, so every session reads the same thing
+      IFS=',' read -ra GL <<<"$2"
+      for g in "${GL[@]}"; do
+        g="${g#"${g%%[![:space:]]*}"}"; g="${g%"${g##*[![:space:]]}"}"
+        [ -z "$g" ] && continue
+        case "$g" in *'}'*|*','*) echo "slog: '}' is not allowed in a path glob" >&2; exit 2;; esac
+        case "$g" in /*) ;; *) g="$PWD/$g";; esac
+        PATHS="${PATHS:+$PATHS,}$g"
+      done
+      shift 2
+    fi
     CONF=""
-    while IFS=$'\t' read -r key who when flag; do
+    while IFS=$'\t' read -r key who when flag _paths; do
       [ -z "${key:-}" ] && continue
       [ "$who" = "$TAG" ] && continue
-      if overlap "$key" "$R"; then CONF="${CONF}"$'\n'"   🔒 ${key} — ${who} (${when}${flag:+ ⚠$flag})"; fi
+      if overlap "$key" "$R"; then CONF="${CONF}"$'\n'"   🔒 ${key} — ${who} (${when}$([ "$flag" != stale ] || echo " ⚠stale"))"; fi
     done < <(active_locks)
     if [ -n "$CONF" ]; then
       echo "⚠️  '$R' OVERLAPS lock(s) held by another session:" >&2
       printf '%s\n' "${CONF#$'\n'}" >&2
       echo "   (recorded under your name anyway — coordinate before you overwrite their work)" >&2
     fi
-    append "🔒 TAKE [$R] ${*:-}"
-    echo "🔒 taken: $R   (release with: slog free \"$R\")"
+    PTAG=""; [ -n "$PATHS" ] && PTAG=" {paths:$PATHS}"
+    append "🔒 TAKE [$R]$PTAG ${*:-}"
+    echo "🔒 taken: $R${PATHS:+  → guards $PATHS}   (release with: slog free \"$R\")"
     ;;
   free)
     mutex
     R=$(canon "${2:?usage: slog free <resource> [note]}"); shift 2 || true
     START=""
-    while IFS=$'\t' read -r key who when flag; do
+    while IFS=$'\t' read -r key who when flag _paths; do
       [ -z "${key:-}" ] && continue
       if [ "$key" = "$R" ] && [ "$who" = "$TAG" ]; then START="$when"; fi
     done < <(active_locks)
@@ -164,7 +186,7 @@ case "$CMD" in
     ;;
   status|st)
     echo "── active locks ──"
-    OUT=$(active_locks | awk -F'\t' '{printf "  🔒 %-26s %s  (%s%s)\n", $1, $2, $3, ($4!=""?" ⚠"$4:"")}')
+    OUT=$(active_locks | awk -F'\t' '{printf "  🔒 %-26s %s  (%s%s)%s\n", $1, $2, $3, ($4=="stale"?" ⚠stale":""), ($5!="-"&&$5!=""?"  guards "$5:"")}')
     [ -n "$OUT" ] && echo "$OUT" || echo "  (none)"
     echo "── feed (last 12) ──"; ensure
     { grep -v '^#' "$BOARD" | grep -v '^[[:space:]]*$' | tail -n 12 | sed -E 's/ · s:[0-9a-f-]{8,}$//'; } || true

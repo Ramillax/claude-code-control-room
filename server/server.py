@@ -212,6 +212,39 @@ def read_state(sess):
         return {}
 
 
+# Leaving "blocked" when you answer NO. The hook enters "blocked" (Notification
+# permission_prompt) and a "yes" leaves it (the tool runs → PostToolUse), but a "no", Esc or ^C
+# fires no hook, so the tile stayed red until your next prompt. The screen fills that gap:
+# once we have SEEN the permission box for this blocked episode, its disappearance means the
+# question was answered. The screen is only ever used to LEAVE "blocked", never to enter it, and
+# only after it confirmed the box once — so if a Claude Code UI update breaks these patterns,
+# the box is simply never "seen" and you are back to hook-only behavior, never a missed alert.
+PERMISSION_BOX = re.compile(r"Do you want to proceed\?|No, and tell Claude what to do|Do you trust the files|❯ 1\.")
+_box_seen = {}           # session -> ts of the hook "blocked" event whose box we saw on screen
+
+
+def pane_shows_permission(sess, pane=""):
+    """True/False = the box is/isn't on screen; None = couldn't read the pane."""
+    target = pane if re.fullmatch(r"%\d+", pane or "") else "=" + sess + ":"
+    r = run(TMUX + ["capture-pane", "-p", "-t", target], timeout=3)
+    if not r or r.returncode != 0:
+        return None
+    return bool(PERMISSION_BOX.search(r.stdout.decode(errors="replace")))
+
+
+def effective_state(sess):
+    s = read_state(sess)
+    st = s.get("state") or "unknown"      # no hook event yet (or hooks not installed)
+    if st != "blocked":
+        return st
+    on_screen = pane_shows_permission(sess, s.get("pane", ""))
+    if on_screen:
+        _box_seen[sess] = s.get("ts", 0)
+    elif on_screen is False and _box_seen.get(sess) == s.get("ts", 0):
+        return "idle"                     # answered where no hook can see it: "no", Esc, ^C
+    return st
+
+
 def slog_locks():
     r = run([SLOG, "locks"], timeout=10)
     out = []
@@ -247,7 +280,7 @@ def status():
         elif s in SHELLS:
             st = "shell"
         else:
-            st = read_state(s).get("state") or "unknown"   # no hook event yet (or hooks not installed)
+            st = effective_state(s)
         sessions.append({"name": s, "state": st,
                          "locks": [l["key"] for l in locks if l["owner"] == s]})
     return {"sessions": sessions, "locks": locks, "feed": slog_feed(),
