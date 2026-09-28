@@ -96,6 +96,10 @@ check "…and hides your own"                      '! grep -q "alice  src/a.txt"
 check "…your own = this conversation (Session:)" '! grep -q "alice  src/a.txt" "$T/h1s" && grep -q "bob/bash  src/b.txt" "$T/h1s"'
 (cd "$HP" && SLOG_TAG=alice CLAUDE_CODE_SESSION_ID=aaaaaaaa-1111-1111-1111-111111111111 "$HERE/bin/cr-hist" changed) > "$T/h1c"
 check "after /clear the earlier conversation shows" 'grep -q "alice  src/a.txt.*earlier conversation" "$T/h1c"'
+check "…and what it hides is counted"            'grep -q "(1 of this conversation.s own hidden)" "$T/h1s"'
+for v in b2 b3; do echo $v > "$HP/src/b.txt"; hh bob '{"tool_name":"Bash","tool_input":{"command":"x"},"cwd":"'"$HP"'"}' bbbbbbbb-0000-0000-0000-000000000000; done
+(cd "$HP" && env -u CLAUDE_CODE_SESSION_ID SLOG_TAG=alice "$HERE/bin/cr-hist" changed) > "$T/h1g"
+check "repeated saves collapse into one line ×N" '[ "$(grep -c "bob/bash  src/b.txt" "$T/h1g")" = 1 ] && grep -q "bob/bash  src/b.txt  ×3" "$T/h1g"'
 (cd "$HP" && "$HERE/bin/cr-hist" who src/a.txt) > "$T/h2"
 check "who links the change to its session"      'grep -q "alice  src/a.txt  s:aaaaaaaa" "$T/h2"'
 (cd "$HP" && "$HERE/bin/cr-hist" prev src/a.txt "$T/a.prev") >/dev/null

@@ -74,15 +74,25 @@ case "$CMD" in
     # "Yours" means this CONVERSATION (the Session: trailer), not this tmux window: after /clear the
     # window is the same but the memory isn't, so what the earlier conversation changed must show up.
     # Without CLAUDE_CODE_SESSION_ID (a human at the prompt) it falls back to hiding the window's commits.
+    # What it hides is COUNTED, so "nothing changed" is never a silent filter. Consecutive commits with
+    # the same subject (one file saved 5 times) collapse into one line: newest hash, ×N.
     sid="${CLAUDE_CODE_SESSION_ID:-}"
     out=$(H log --since="$hours hours ago" --date=format:'%m-%d %H:%M' \
             --format="$FMT%x1f%(trailers:key=Session,valueonly,separator=)" | grep -v '  baseline:' |
           awk -F '\037' -v sid="$sid" -v me="$me" '
+            function flush() { if (n) print prev (n > 1 ? "  ×" n : ""); n = 0 }
             { mine = me != "" && (index($1, "auto(" me "): ") || index($1, "auto(" me "/bash): ")) }
-            sid != "" && $2 == sid { next }
-            sid == "" && mine      { next }
-            { print $1 (mine ? "  ← this window, earlier conversation" : "") }' | pretty || true)
-    if [ -z "$out" ]; then echo "(nothing changed by other sessions in the last ${hours}h)"; else printf '%s\n' "$out" | head -n 60; fi
+            (sid != "" && $2 == sid) || (sid == "" && mine) { hid++; next }
+            { line = $1 (mine ? "  ← this window, earlier conversation" : "")
+              key = line; sub(/^[^ ]+  [^ ]+ [^ ]+  /, "", key) }        # drop hash + date
+            key == pkey { n++; next }
+            { flush(); prev = line; pkey = key; n = 1 }
+            END { flush(); print "#hidden " hid + 0 }' | pretty || true)
+    hid=$(printf '%s\n' "$out" | sed -n 's/^#hidden //p'); out=$(printf '%s\n' "$out" | grep -v '^#hidden ' || true)
+    [ -n "$sid" ] && whose="this conversation's" || whose="this window's"
+    note="${hid:-0} of ${whose} own hidden"
+    if [ -z "$out" ]; then echo "(nothing changed by other sessions in the last ${hours}h; $note)"
+    else printf '%s\n' "$out" | head -n 60; if [ "${hid:-0}" -gt 0 ]; then echo "($note)"; fi; fi
     ;;
   who)
     W=$(find_repo); f="${1:?usage: cr-hist who <path>}"
