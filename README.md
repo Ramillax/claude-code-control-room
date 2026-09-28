@@ -24,7 +24,7 @@ What you get:
 - **`slog`, a shared board with hierarchical advisory locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds.
 - **Built for the phone**: an on-screen key bar (Esc, arrows, Tab, Ctrl-C…), swipe to scroll history, tap-to-jump between sessions.
 - **Files both ways**: upload, drag & drop, or **paste a screenshot with Ctrl-V**. The path gets typed into the session's prompt. The download dialog opens on an outbox where agents drop things for you.
-- **📋 One-tap clip**: the agent leaves a long command with `cr-clip` and you copy it with one tap instead of fighting a terminal selection.
+- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap. On a phone this is *the* way to copy: selecting text inside a terminal doesn't work well there.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
 - **Skills that survive the session**: a 3-layer structure (router / current state / decision log), a `skill-sync` skill that consolidates each session's findings before it closes, and `skill-lint` to catch what parallel sessions break (duplicate changelog ids, dead pointers, bloated routers).
 
@@ -87,7 +87,7 @@ It never downloads anything and never needs sudo. Every step backs up what it ed
 
 - `--hooks` adds the state hook to `~/.claude/settings.json` (keeps your existing settings). Without it the tiles still work, but their state dot stays grey. Restart running sessions after adding it.
 - `--skills` installs the `skill-sync` skill into `~/.claude/skills/`.
-- `--tmux` appends `examples/tmux.conf` to `~/.tmux.conf`: mouse/swipe scrolling, copying to the device clipboard, and it disables tmux's right-click menu, whose "Kill" item used to kill sessions on a stray tap.
+- `--tmux` appends `examples/tmux.conf` to `~/.tmux.conf`: mouse/swipe scrolling, copying a mouse selection to your clipboard on desktop, and it disables tmux's right-click menu, whose "Kill" item used to kill sessions on a stray tap.
 - `--workdir` is the folder new sessions start in (your project).
 
 Prefer to do it by hand? Every step has its source in `examples/`.
@@ -231,7 +231,7 @@ Optional: `CR_STT_LANGUAGE=en` and `CR_STT_PROMPT="Postgres, Kubernetes, YourPro
 ## On the phone
 
 - The key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
-- **Copying from a terminal**: scroll up one notch (enters tmux copy-mode and freezes the screen), then drag and release. The selection goes to your device clipboard via OSC 52. Or have the agent use `cr-clip`.
+- **Copying**: ask the agent to put it in the clip (`cr-clip`), then tap 📋. Selecting text inside the terminal is unreliable on touch screens, so don't count on it. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
 - If the 🎤 fails with `NotAllowedError` while the site permission is granted, the block is at the OS level, or it's a `Permissions-Policy` header from your proxy, which must allow `microphone=(self)`.
 
 ## What's in the box

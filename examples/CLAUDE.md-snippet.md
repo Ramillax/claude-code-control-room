@@ -25,7 +25,7 @@ Rules:
 
 ## Handing things to the user
 
-- `cr-clip "text"` — a long command or ID the user must paste somewhere: they copy it with one tap (📋).
+- `cr-clip "text"` — a long command or ID the user must paste somewhere, or anything they ask you to copy: they copy it with one tap (📋). Use it by default: the user may be on a phone, where selecting text in the terminal does not work.
 - `cr-expose <file>` — a file the user should download: it appears first in the 📥 dialog.
 - Uploaded files arrive under `.controlroom/uploads/`. For PDFs, read the `.txt` sidecar first — far fewer tokens.
 
