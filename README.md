@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml)
 [![Open in GitHub Codespaces](https://img.shields.io/badge/Try_it-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
 
