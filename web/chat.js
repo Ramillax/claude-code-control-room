@@ -398,7 +398,7 @@ setInterval(()=> tilesArr().forEach((_, i)=> pollChat(i)), 1500);
     open(href, a.getAttribute("title") || (a.querySelector(".nm") || {}).textContent || "", a.classList.contains("att-pdf"));
   });
   lb.addEventListener("click", e=>{ if(e.target === lb || e.target === body || e.target.closest(".lbx")) close(); });
-  document.addEventListener("keydown", e=>{ if(e.key === "Escape" && lb.classList.contains("on")) close(); });
+  document.addEventListener("keydown", e=>{ if(e.key === "Escape" && lb.classList.contains("on")){ e.preventDefault(); close(); } });   // this Esc doesn't interrupt Claude
 })();
 
 // ── Plan usage (5-hour session / week) + context % per tile, from the silent statusLine ─────
@@ -419,6 +419,22 @@ async function pollUsage(){
   try{ const r = await fetch("api/usage?t="+Date.now(), {cache:"no-store"}); if(r.ok){ lastUsage = await r.json(); paintUsage(); } }catch(e){}
 }
 setInterval(pollUsage, 15000); pollUsage();
+
+// ── Esc in Chat mode = interrupt Claude in that tile, like in the terminal ───────────────────────
+// In Chat the focus is on the page, not the xterm: without this the keyboard's Esc did nothing.
+// The viewer has priority: if it's open, Esc closes it and doesn't interrupt.
+function interruptTile(idx){
+  const t = tilesArr()[idx]; if(!t) return;
+  chatSend(idx, {key:"Escape"});
+  const w = t.querySelector(".working");
+  if(w){ w.classList.add("spin"); w.querySelector(".verb").textContent = "⏹ interrupting…"; w.querySelector(".meta").textContent = ""; }
+}
+document.addEventListener("keydown", e=>{
+  if(e.key !== "Escape" || e.defaultPrevented) return;
+  const lb = document.getElementById("lightbox"); if(lb && lb.classList.contains("on")) return;
+  const t = tilesArr()[activeIdx]; if(!t || t.dataset.mode !== "chat") return;
+  e.preventDefault(); interruptTile(activeIdx);
+});
 
 // ── Tap the mode pill = Shift+Tab in that tile (normal → accept edits → plan → auto) ──────────
 document.addEventListener("click", e=>{

@@ -39,6 +39,7 @@ ctx=$(printf '{"hook_event_name":"SessionStart","source":"compact","cwd":"%s"}' 
       | SLOG_TAG=bob python3 "$HERE/hooks/cr-context-hook.py" \
       | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')
 check "SessionStart injects the locks"  'grep -q "api:auth — alice" <<<"$ctx"'
+check "…and how to hand files/clips in Chat"  'grep -q "Download card" <<<"$ctx"'
 check "…and the project notes"          'grep -q "bump pg" <<<"$ctx"'
 printf '{"hook_event_name":"SessionEnd","reason":"exit"}' | SLOG_TAG=alice python3 "$HERE/hooks/cr-context-hook.py"
 locks; check "SessionEnd frees the session's locks" '! grep -q alice "$T/locks"'

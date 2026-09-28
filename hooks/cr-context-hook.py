@@ -12,6 +12,8 @@ it injects into the session's context:
     · the project's notes (bin/cr-notes: done / next / don't redo)
     · the files OTHER sessions changed in the last hours (bin/cr-hist, if the project is recorded);
       this window's own changes stay out, also those of its conversation before a /clear
+    · how to hand things to the human in the Chat view (download / image / PDF / copy cards) — only
+      inside a control-room tmux session; CR_CHAT_TIPS=0 turns it off
 
 On SessionEnd it releases the locks this window still holds, so a session that exits cleanly
 doesn't leave locks behind (a crash still can: those go ⚠stale after SLOG_STALE_HOURS and stop
@@ -147,6 +149,15 @@ def session_start(ev):
         lines = notes.splitlines()
         extra = f"\n… {len(lines) - MAX_NOTES} more: cr-notes show" if len(lines) > MAX_NOTES else ""
         parts.append("Project notes (done / next / don't redo):\n" + "\n".join(lines[:MAX_NOTES]) + extra)
+    # How to hand things to the human in the web UI's Chat view (web/chat.js renders these as cards).
+    # Only inside a control-room tmux session: elsewhere there is no chat to render them.
+    if me and os.environ.get("CR_CHAT_TIPS", "1") != "0":
+        parts.append(
+            "Handing things to the human (control room, Chat view — often read on a phone):\n"
+            "- A file to download: write its FULL path (absolute or ~/) in your reply → a one-tap Download card. "
+            "Only if it exists inside CR_FILE_ROOTS; `cr-expose <file>` puts it in the outbox first.\n"
+            "- An image or a PDF: its full path (or `![](path)`) → a thumbnail / PDF card that opens in an in-page viewer.\n"
+            "- Text to copy (a command, a block, a draft): `cr-clip` → a Copy card right under that step, next to any file card.")
     if not parts:
         return
     head = (f"[control room] You are tmux session '{me}'. " if me else "[control room] ") + \

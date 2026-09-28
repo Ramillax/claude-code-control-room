@@ -455,7 +455,8 @@ if(window.visualViewport){
     // in Chat, arrows and Enter go through tmux too (the xterm underneath has no focus); in Term, through xterm (hold to repeat)
     const CHAT = {up:"Up", down:"Down", left:"Left", right:"Right", enter:"Enter"};
     const chatMode = document.body.classList.contains("chatmode");
-    if(SRV[b.dataset.key]) chatSend(activeIdx, {key: SRV[b.dataset.key]});
+    if(b.dataset.key === "esc" && chatMode) interruptTile(activeIdx);
+    else if(SRV[b.dataset.key]) chatSend(activeIdx, {key: SRV[b.dataset.key]});
     else if(chatMode && CHAT[b.dataset.key]){ chatSend(activeIdx, {key: CHAT[b.dataset.key]}); return; }
     else sendKey(b.dataset.key);
     if(b.dataset.rep) holdT = setTimeout(()=>{ repT = setInterval(()=>sendKey(b.dataset.key), 110); }, 380);   // hold to repeat
