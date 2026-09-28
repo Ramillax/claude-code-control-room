@@ -7,8 +7,8 @@ before touching shared things, and that depends on the agent following a line in
 This hook removes the "if": on SessionStart (new session, resume, /clear AND after compaction)
 it injects into the session's context:
 
-    · the live locks, and who holds them
-    · the last lines of the board's feed
+    · the live locks, and who holds them (or an explicit "none", only when slog answered)
+    · the last lines of the board's feed, with closed TAKE/FREE pairs folded into one line
     · the project's notes (bin/cr-notes: done / next / don't redo)
     · the files OTHER sessions changed in the last hours (bin/cr-hist, if the project is recorded);
       this window's own changes stay out, also those of its conversation before a /clear
@@ -48,11 +48,62 @@ def my_tag():
     return ""
 
 
+def live_locks():
+    """Active locks as TSV rows, or None if slog failed: "no locks" and "couldn't read them" differ."""
+    try:
+        r = subprocess.run([os.path.join(BIN, "slog"), "locks"], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    return [l.split("\t") for l in r.stdout.strip().splitlines() if l]
+
+
+LINE = re.compile(r"^(\S+ (\d\d:\d\d)) · (\S+) · (.*?)\s*$")
+TAKE = re.compile(r"^🔒 TAKE \[(.+?)\]")
+FREE = re.compile(r"^✅ FREE \[(.+?)\](?: \(\S+ since (\d\d:\d\d)\))?\s*(.*)$")
+
+
+def fold_locks(lines):
+    """A TAKE whose FREE is also in view tells nothing on its own: the pair is dropped, and consecutive
+    FREEs from the same session become ONE line with the intervals. Without this, four closed locks
+    ate eight feed lines and pushed out the summary line, which is the one worth reading."""
+    rows = [LINE.match(l) for l in lines]
+    drop = set()
+    for i, m in enumerate(rows):
+        fr = m and FREE.match(m.group(4))
+        if not fr:
+            continue
+        for j in range(i - 1, -1, -1):
+            t = rows[j] and j not in drop and TAKE.match(rows[j].group(4))
+            if t and t.group(1) == fr.group(1) and rows[j].group(3) == m.group(3):
+                drop.add(j)
+                break
+    out, grp = [], None     # grp = (session, [items]) of the run of FREEs being folded
+    for i, (l, m) in enumerate(zip(lines, rows)):
+        if i in drop:
+            continue
+        fr = m and FREE.match(m.group(4))
+        if not fr:
+            out.append(l)
+            grp = None
+            continue
+        item = f"{fr.group(1)} {fr.group(2) + '–' if fr.group(2) else '→'}{m.group(2)}" \
+            + (f" ({fr.group(3)})" if fr.group(3) else "")
+        if grp and grp[0] == m.group(3):
+            grp[1].append(item)
+        else:
+            grp = (m.group(3), [item])
+            out.append(None)
+        out[-1] = f"{m.group(1)} · {m.group(3)} · 🔓 locks released: " + " · ".join(grp[1])
+    return out
+
+
 def session_start(ev):
     cwd = ev.get("cwd") or os.getcwd()
     me = my_tag()
     parts = []
-    locks = [l.split("\t") for l in run([os.path.join(BIN, "slog"), "locks"]).splitlines() if l]
+    locks = live_locks()
     if locks:
         rows = []
         for p in locks:
@@ -62,8 +113,11 @@ def session_start(ev):
             rows.append(f"- {key} — {owner}{' (you)' if owner == me else ''}, since {since}"
                         f"{' ⚠stale' if stale else ''}{'; guards ' + guards if guards else ''}")
         parts.append("Active locks:\n" + "\n".join(rows))
-    tail = run([os.path.join(BIN, "slog"), "tail", str(FEED + 4)])
-    feed = [l.split(" · s:")[0] for l in tail.splitlines() if l.strip() and not l.startswith("#")][-FEED:]
+    elif locks is not None:   # confirmed empty; if slog failed, saying "none" would be a guess
+        parts.append("Active locks: none.")
+    # read extra lines: fold_locks() collapses closed TAKE/FREE pairs, so the feed shrinks
+    tail = run([os.path.join(BIN, "slog"), "tail", str(FEED * 4)])
+    feed = fold_locks([l.split(" · s:")[0] for l in tail.splitlines() if l.strip() and not l.startswith("#")])[-FEED:]
     if feed:
         parts.append("Recent board feed:\n" + "\n".join(feed))
     # Only OTHER sessions: /clear is a clean slate, so what this window's earlier conversation changed

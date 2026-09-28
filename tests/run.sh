@@ -42,6 +42,16 @@ check "SessionStart injects the locks"  'grep -q "api:auth — alice" <<<"$ctx"'
 check "…and the project notes"          'grep -q "bump pg" <<<"$ctx"'
 printf '{"hook_event_name":"SessionEnd","reason":"exit"}' | SLOG_TAG=alice python3 "$HERE/hooks/cr-context-hook.py"
 locks; check "SessionEnd frees the session's locks" '! grep -q alice "$T/locks"'
+SLOG_TAG=carol "$HERE/bin/slog" take db >/dev/null; SLOG_TAG=carol "$HERE/bin/slog" free db >/dev/null
+SLOG_TAG=carol "$HERE/bin/slog" "migrated the schema" >/dev/null
+ctx=$(printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$T/proj" | SLOG_TAG=bob python3 "$HERE/hooks/cr-context-hook.py" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')
+check "a closed TAKE/FREE pair folds into one line" 'grep -q "carol · 🔓 locks released: db" <<<"$ctx" && ! grep -q "TAKE \[db\]" <<<"$ctx"'
+check "…and the feed line after it survives"       'grep -q "migrated the schema" <<<"$ctx"'
+ctx=$(printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$T/proj" \
+      | SLOG_BOARD="$T/empty/SESSIONS.md" SLOG_TAG=bob python3 "$HERE/hooks/cr-context-hook.py" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])')
+check "no locks is said explicitly"                'grep -q "Active locks: none." <<<"$ctx"'
 
 echo "cr-exclusive"
 SLOG_TAG=alice "$HERE/bin/cr-exclusive" res -- sleep 2 & sleep 0.3
