@@ -1,0 +1,6 @@
+# local config (may contain API keys)
+controlroom.env
+# runtime data if you run it with CR_WORKDIR pointing here
+.controlroom/
+__pycache__/
+*.pyc
