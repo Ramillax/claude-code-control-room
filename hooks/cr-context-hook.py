@@ -10,8 +10,8 @@ it injects into the session's context:
     · the live locks, and who holds them
     · the last lines of the board's feed
     · the project's notes (bin/cr-notes: done / next / don't redo)
-    · the files other sessions changed in the last hours (bin/cr-hist, if the project is recorded),
-      including what an earlier conversation of this same window changed before a /clear
+    · the files OTHER sessions changed in the last hours (bin/cr-hist, if the project is recorded);
+      this window's own changes stay out, also those of its conversation before a /clear
 
 On SessionEnd it releases the locks this window still holds, so a session that exits cleanly
 doesn't leave locks behind (a crash still can: those go ⚠stale after SLOG_STALE_HOURS and stop
@@ -19,7 +19,7 @@ being enforced).
 
 Fails open and silent: any error → no context added, nothing released, exit 0.
 """
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
@@ -66,15 +66,28 @@ def session_start(ev):
     feed = [l.split(" · s:")[0] for l in tail.splitlines() if l.strip() and not l.startswith("#")][-FEED:]
     if feed:
         parts.append("Recent board feed:\n" + "\n".join(feed))
-    # cr-hist hides only THIS conversation's commits (Session: trailer), so after /clear the session
-    # still sees what its own window's earlier conversation changed
-    hist = run([os.path.join(BIN, "cr-hist"), "changed", str(CHANGED_HOURS)], cwd=cwd,
-               env={**os.environ, "CLAUDE_CODE_SESSION_ID": ev.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")})
-    if hist and not hist.startswith("("):
-        lines = hist.splitlines()
+    # Only OTHER sessions: /clear is a clean slate, so what this window's earlier conversation changed
+    # stays out (it can't collide with anything, and it would pull the new conversation back into the
+    # old line of work). cr-hist hides the window's commits when given only its tag; without a tmux
+    # tag, the session id is the best it can do (hides this conversation only).
+    env = dict(os.environ)
+    if me:
+        env["SLOG_TAG"] = me
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+    else:
+        env["CLAUDE_CODE_SESSION_ID"] = ev.get("session_id") or env.get("CLAUDE_CODE_SESSION_ID", "")
+    hist = run([os.path.join(BIN, "cr-hist"), "changed", str(CHANGED_HOURS)], cwd=cwd, env=env)
+    # cr-hist ends with a "(N of … own hidden)" note (or is only that note when nobody else changed
+    # anything): the files stay out, but one line says they exist and how to list them
+    lines = [l for l in hist.splitlines() if not l.startswith("(")]
+    own = re.search(r"(\d+) of this window's own hidden", hist)
+    if lines:
         more = f"\n… {len(lines) - CHANGED_MAX} more: cr-hist changed {CHANGED_HOURS}" if len(lines) > CHANGED_MAX else ""
         parts.append(f"Files other sessions changed in the last {CHANGED_HOURS}h (cr-hist who <file> for detail):\n"
                      + "\n".join(lines[:CHANGED_MAX]) + more)
+    if own and int(own.group(1)):
+        parts.append(f"This window's own changes ({own.group(1)} in {CHANGED_HOURS}h, including any from before a /clear) "
+                     f"are left out; `cr-hist changed {CHANGED_HOURS}` lists them if you need them.")
     notes = run([os.path.join(BIN, "cr-notes"), "show"], cwd=cwd)
     if notes and not notes.startswith("("):
         lines = notes.splitlines()

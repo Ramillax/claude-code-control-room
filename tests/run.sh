@@ -95,7 +95,7 @@ check "…and hides your own"                      '! grep -q "alice  src/a.txt"
 (cd "$HP" && SLOG_TAG=alice CLAUDE_CODE_SESSION_ID=aaaaaaaa-0000-0000-0000-000000000000 "$HERE/bin/cr-hist" changed) > "$T/h1s"
 check "…your own = this conversation (Session:)" '! grep -q "alice  src/a.txt" "$T/h1s" && grep -q "bob/bash  src/b.txt" "$T/h1s"'
 (cd "$HP" && SLOG_TAG=alice CLAUDE_CODE_SESSION_ID=aaaaaaaa-1111-1111-1111-111111111111 "$HERE/bin/cr-hist" changed) > "$T/h1c"
-check "after /clear the earlier conversation shows" 'grep -q "alice  src/a.txt.*earlier conversation" "$T/h1c"'
+check "…on demand, the earlier conversation shows" 'grep -q "alice  src/a.txt.*earlier conversation" "$T/h1c"'
 check "…and what it hides is counted"            'grep -q "(1 of this conversation.s own hidden)" "$T/h1s"'
 for v in b2 b3; do echo $v > "$HP/src/b.txt"; hh bob '{"tool_name":"Bash","tool_input":{"command":"x"},"cwd":"'"$HP"'"}' bbbbbbbb-0000-0000-0000-000000000000; done
 (cd "$HP" && env -u CLAUDE_CODE_SESSION_ID SLOG_TAG=alice "$HERE/bin/cr-hist" changed) > "$T/h1g"
@@ -105,6 +105,14 @@ check "who links the change to its session"      'grep -q "alice  src/a.txt  s:a
 (cd "$HP" && "$HERE/bin/cr-hist" prev src/a.txt "$T/a.prev") >/dev/null
 check "prev returns the version before"          '[ "$(cat "$T/a.prev")" = v1 ]'
 check "the project's own git is untouched"       '[ "$(git -C "$HP" rev-list --count HEAD)" = 1 ]'
+echo v3 > "$HP/src/a.txt"   # alice (window) edits again in the conversation before her /clear
+hh alice '{"tool_name":"Edit","tool_input":{"file_path":"'"$HP"'/src/a.txt"},"cwd":"'"$HP"'"}' aaaaaaaa-0000-0000-0000-000000000000
+printf '{"hook_event_name":"SessionStart","source":"clear","session_id":"aaaaaaaa-1111-1111-1111-111111111111","cwd":"%s"}' "$HP" \
+  | SLOG_TAG=alice python3 "$HERE/hooks/cr-context-hook.py" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])' \
+  > "$T/hctxall"; grep -E "src/(a|b)\.txt" "$T/hctxall" > "$T/hctx"
+check "after /clear the context shows only OTHER sessions" 'grep -q "bob/bash  src/b.txt" "$T/hctx" && ! grep -q "alice  src/a.txt" "$T/hctx"'
+check "…with one line pointing to its own" 'grep -q "own changes (2 in 12h" "$T/hctxall"'
 
 echo "cr-cc (terminal dashboard)"
 if command -v tmux >/dev/null; then
