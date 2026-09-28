@@ -6,7 +6,9 @@
 
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
 
-![Six Claude Code sessions side by side](docs/screenshot.jpeg)
+![Six sessions in the control room: two agents collide on a lock, one waits for permission, the board shows who holds what](docs/demo.png)
+
+<sub>Staged demo: real Claude Code first-run screens and real <code>slog</code> commands; the state events were fired by hand.</sub>
 
 Three layers, one idea: **several agents working on the same project without stepping on each other**.
 
@@ -37,6 +39,8 @@ No frameworks, no build step, no `npm install`: Python standard library, bash, a
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
 
 GitHub builds a container with tmux, ttyd and Claude Code, starts the panel and opens it in your browser. Log in to Claude Code in the first tile and you're running. The forwarded port is **private**: only your GitHub account can open it, so you get authentication for free. The free Codespaces quota covers dozens of hours a month.
+
+Open it in a **browser tab** (🌐 in the **Ports** tab): VS Code's built-in preview can't show it, because the panel refuses to be embedded in other pages (that's what keeps other sites from framing your terminal).
 
 > ⚠️ **Running it on your own server?** It ships with **no authentication**: put a login in front before exposing it. See [Security](#security) below.
 
