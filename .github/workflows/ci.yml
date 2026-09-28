@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash syntax + shellcheck
+        run: |
+          files="install.sh start.sh bin/cr-clip bin/cr-expose bin/cr-session bin/skill-new bin/slog .devcontainer/setup.sh .devcontainer/start-bg.sh"
+          for f in $files; do bash -n "$f"; done
+          shellcheck --severity=error $files
+      - name: python compiles
+        run: python3 -m py_compile server/server.py hooks/cr-state-hook.py bin/skill-lint
+      - name: skill-lint on the bundled skills
+        run: python3 bin/skill-lint skills
+
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux ttyd
+      - name: install.sh
+        run: bash install.sh --workdir "$PWD"
+      - name: start the panel and hit it
+        run: |
+          export CR_STATE_DIR="$RUNNER_TEMP/cr"
+          ./start.sh > "$RUNNER_TEMP/cr.log" 2>&1 &
+          for i in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:7680/ && break; sleep 1; done
+          curl -fsS http://127.0.0.1:7680/ | grep -q '<html'                       # the UI
+          curl -fsS -o /dev/null "http://127.0.0.1:7680/tty/?arg=shell"             # ttyd through the proxy
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7680/dl?p=/etc/passwd")
+          [ "$code" != 200 ] || { echo "file browser served a path outside CR_FILE_ROOTS"; exit 1; }
+          cat "$RUNNER_TEMP/cr.log"
+      - name: slog locks (hierarchical conflict)
+        run: |
+          export SLOG_BOARD="$RUNNER_TEMP/board/SESSIONS.md"
+          SLOG_TAG=alice bin/slog take "api:auth"
+          SLOG_TAG=bob   bin/slog take "api:billing"
+          SLOG_TAG=bob   bin/slog take api 2>&1 | tee out.txt
+          grep -qi 'overlap\|conflict\|held' out.txt
+          bin/slog locks

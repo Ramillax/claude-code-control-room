@@ -1,5 +1,9 @@
 # Claude Code Control Room
 
+[![CI](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml)
+[![Open in GitHub Codespaces](https://img.shields.io/badge/Try_it-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
 
 ![Six Claude Code sessions side by side](docs/screenshot.jpeg)
@@ -28,51 +32,13 @@ No frameworks, no build step, no `npm install`: Python standard library, bash, a
 
 ---
 
-## ⚠️ Security: read this before anything else
+## Try it in one click
 
-**This project ships with NO authentication.** Whoever can open the page gets a shell running as your user, with whatever your Claude sessions can do.
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
 
-### What was removed from the original setup, and what you must replace
+GitHub builds a container with tmux, ttyd and Claude Code, starts the panel and opens it in your browser. Log in to Claude Code in the first tile and you're running. The forwarded port is **private**: only your GitHub account can open it, so you get authentication for free. The free Codespaces quota covers dozens of hours a month.
 
-The deployment this was extracted from ran behind several protections. They were **deliberately removed** from this release, because each one is specific to one infrastructure and publishing it would mean publishing that infrastructure. **You have to put your own equivalents back:**
-
-| Removed layer | What it did | Pick your replacement |
-|---|---|---|
-| **Identity-aware proxy (SSO)** | Only one specific account could even load the page | Cloudflare Access / Tunnel, Tailscale, oauth2-proxy, Authelia, Pomerium… |
-| **Origin IP allowlist** | The server only accepted connections coming from that proxy, so it couldn't be reached directly | Firewall rules, or bind to localhost / a private interface only |
-| **Second factor (TOTP)** | A code from an authenticator app on top of the SSO login, with long sessions | Your proxy's MFA (most of the ones above have it) |
-| **TLS** | Encrypted transport | Whatever proxy/tunnel you choose |
-
-### What *is* still built in
-
-- Binds to **`127.0.0.1` only** by default. The server prints a warning if you change that.
-- **ttyd has no TCP port at all**: it listens on a UNIX socket and is reachable only through this server's `/tty/` proxy.
-- Terminals can open **only the session names you allowlist** (`CR_SESSIONS`).
-- The file browser only serves paths **inside `CR_FILE_ROOTS`**, resolved with `realpath` (`../` tricks and escaping symlinks get a 404).
-- Delete works **only inside `uploads/` and `outbox/`**. It's never recursive and always goes through a POST (link prefetchers can't trigger it).
-- Uploaded paths and dictated text are typed into the prompt **without Enter**, so nothing runs until you review it.
-
-### How to use it from other devices
-
-**Recommended: your own subdomain, behind a login.** This is how the original setup runs every day, and the only way that's comfortable from a phone: open `https://panel.yourdomain.com` from any device and you get the full grid.
-
-1. Keep the server on `127.0.0.1` (the default). Never expose the port itself.
-2. Put a reverse proxy or tunnel in front that provides **HTTPS + a login**, ideally with a second factor:
-   - **Cloudflare Tunnel + Cloudflare Access**: no open ports at all; allow only your own email.
-   - **Tailscale**: the panel is reachable only from your own devices, on your private network.
-   - **Your own reverse proxy** (Caddy, Traefik, nginx) + an SSO layer (oauth2-proxy, Authelia, Pomerium) with 2FA, and a firewall so the server only accepts connections from that proxy.
-3. If you use a `Permissions-Policy` header, allow `microphone=(self)` for the 🎤 button to work.
-
-⚠ A subdomain **without** a login in front is an open shell on your server: bots scan subdomains constantly. The login is not optional.
-
-**Quick way to try it: an SSH tunnel.** Nothing to configure: it reuses the SSH access you already have.
-
-```bash
-ssh -L 7680:127.0.0.1:7680 you@your-server    # keep this open
-# then open http://127.0.0.1:7680 in your browser
-```
-
-You get **the same full web UI** (the grid, all the buttons), not a plain terminal: SSH only carries the traffic, encrypted. It's great from a laptop, awkward from a phone, which is why the subdomain is the everyday option.
+> ⚠️ **Running it on your own server?** It ships with **no authentication**: put a login in front before exposing it. See [Security](#security) below.
 
 ---
 
@@ -123,6 +89,54 @@ It never downloads anything and never needs sudo. Every step backs up what it ed
 Prefer to do it by hand? Every step has its source in `examples/`.
 
 For always-on, see `examples/systemd/`, and **keep `KillMode=process`**. The tmux server is started by ttyd, so it lives in ttyd's cgroup; with the default kill mode, restarting the service kills every Claude session along with it.
+
+---
+
+## Security
+
+**This project ships with NO authentication.** Whoever can open the page gets a shell running as your user, with whatever your Claude sessions can do.
+
+### What was removed from the original setup, and what you must replace
+
+The deployment this was extracted from ran behind several protections. They were **deliberately removed** from this release, because each one is specific to one infrastructure and publishing it would mean publishing that infrastructure. **You have to put your own equivalents back:**
+
+| Removed layer | What it did | Pick your replacement |
+|---|---|---|
+| **Identity-aware proxy (SSO)** | Only one specific account could even load the page | Cloudflare Access / Tunnel, Tailscale, oauth2-proxy, Authelia, Pomerium… |
+| **Origin IP allowlist** | The server only accepted connections coming from that proxy, so it couldn't be reached directly | Firewall rules, or bind to localhost / a private interface only |
+| **Second factor (TOTP)** | A code from an authenticator app on top of the SSO login, with long sessions | Your proxy's MFA (most of the ones above have it) |
+| **TLS** | Encrypted transport | Whatever proxy/tunnel you choose |
+
+### What *is* still built in
+
+- Binds to **`127.0.0.1` only** by default. The server prints a warning if you change that.
+- **ttyd has no TCP port at all**: it listens on a UNIX socket and is reachable only through this server's `/tty/` proxy.
+- Terminals can open **only the session names you allowlist** (`CR_SESSIONS`).
+- The file browser only serves paths **inside `CR_FILE_ROOTS`**, resolved with `realpath` (`../` tricks and escaping symlinks get a 404).
+- Delete works **only inside `uploads/` and `outbox/`**. It's never recursive and always goes through a POST (link prefetchers can't trigger it).
+- Uploaded paths and dictated text are typed into the prompt **without Enter**, so nothing runs until you review it.
+
+### How to use it from other devices
+
+**Recommended: your own subdomain, behind a login.** This is how the original setup runs every day, and the only way that's comfortable from a phone: open `https://panel.yourdomain.com` from any device and you get the full grid.
+
+1. Keep the server on `127.0.0.1` (the default). Never expose the port itself.
+2. Put a reverse proxy or tunnel in front that provides **HTTPS + a login**, ideally with a second factor:
+   - **Cloudflare Tunnel + Cloudflare Access**: no open ports at all; allow only your own email.
+   - **Tailscale**: the panel is reachable only from your own devices, on your private network.
+   - **Your own reverse proxy** (Caddy, Traefik, nginx) + an SSO layer (oauth2-proxy, Authelia, Pomerium) with 2FA, and a firewall so the server only accepts connections from that proxy.
+3. If you use a `Permissions-Policy` header, allow `microphone=(self)` for the 🎤 button to work.
+
+⚠ A subdomain **without** a login in front is an open shell on your server: bots scan subdomains constantly. The login is not optional.
+
+**Quick way to try it: an SSH tunnel.** Nothing to configure: it reuses the SSH access you already have.
+
+```bash
+ssh -L 7680:127.0.0.1:7680 you@your-server    # keep this open
+# then open http://127.0.0.1:7680 in your browser
+```
+
+You get **the same full web UI** (the grid, all the buttons), not a plain terminal: SSH only carries the traffic, encrypted. It's great from a laptop, awkward from a phone, which is why the subdomain is the everyday option.
 
 ---
 
@@ -232,6 +246,8 @@ web/index.html             the grid (one file, no build)
 hooks/cr-state-hook.py     Claude Code hook → per-session state
 skills/                    skill-sync + the 3-layer template
 examples/                  CLAUDE.md snippet, hooks JSON, tmux.conf, systemd units
+.devcontainer/             one-click GitHub Codespaces setup
+.github/workflows/         CI (lint + smoke test of the panel) and releases on tag
 ```
 
 ## How it fits together

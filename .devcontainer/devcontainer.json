@@ -1,0 +1,17 @@
+{
+  // Try the control room in one click: GitHub Codespaces builds this, installs everything and
+  // opens the panel. The forwarded port is PRIVATE by default: only you, logged in to GitHub,
+  // can open it. Don't switch it to Public: that would be an open shell.
+  "name": "Claude Code Control Room",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start-bg.sh",
+  "forwardPorts": [7680],
+  "portsAttributes": {
+    "7680": { "label": "Control Room", "onAutoForward": "openBrowser" }
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/WELCOME.md"] }
+  }
+}
