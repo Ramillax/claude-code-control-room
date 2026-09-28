@@ -89,9 +89,13 @@ echo v2 > "$HP/src/a.txt"
 hh alice '{"tool_name":"Edit","tool_input":{"file_path":"'"$HP"'/src/a.txt"},"cwd":"'"$HP"'"}' aaaaaaaa-0000-0000-0000-000000000000
 echo new > "$HP/src/b.txt"
 hh bob '{"tool_name":"Bash","tool_input":{"command":"x"},"cwd":"'"$HP"'"}' bbbbbbbb-0000-0000-0000-000000000000
-(cd "$HP" && SLOG_TAG=alice "$HERE/bin/cr-hist" changed) > "$T/h1"
+(cd "$HP" && env -u CLAUDE_CODE_SESSION_ID SLOG_TAG=alice "$HERE/bin/cr-hist" changed) > "$T/h1"
 check "changed shows the OTHER session's file"   'grep -q "bob/bash  src/b.txt" "$T/h1"'
 check "…and hides your own"                      '! grep -q "alice  src/a.txt" "$T/h1"'
+(cd "$HP" && SLOG_TAG=alice CLAUDE_CODE_SESSION_ID=aaaaaaaa-0000-0000-0000-000000000000 "$HERE/bin/cr-hist" changed) > "$T/h1s"
+check "…your own = this conversation (Session:)" '! grep -q "alice  src/a.txt" "$T/h1s" && grep -q "bob/bash  src/b.txt" "$T/h1s"'
+(cd "$HP" && SLOG_TAG=alice CLAUDE_CODE_SESSION_ID=aaaaaaaa-1111-1111-1111-111111111111 "$HERE/bin/cr-hist" changed) > "$T/h1c"
+check "after /clear the earlier conversation shows" 'grep -q "alice  src/a.txt.*earlier conversation" "$T/h1c"'
 (cd "$HP" && "$HERE/bin/cr-hist" who src/a.txt) > "$T/h2"
 check "who links the change to its session"      'grep -q "alice  src/a.txt  s:aaaaaaaa" "$T/h2"'
 (cd "$HP" && "$HERE/bin/cr-hist" prev src/a.txt "$T/a.prev") >/dev/null

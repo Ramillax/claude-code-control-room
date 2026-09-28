@@ -10,7 +10,8 @@ it injects into the session's context:
     · the live locks, and who holds them
     · the last lines of the board's feed
     · the project's notes (bin/cr-notes: done / next / don't redo)
-    · the files other sessions changed in the last hours (bin/cr-hist, if the project is recorded)
+    · the files other sessions changed in the last hours (bin/cr-hist, if the project is recorded),
+      including what an earlier conversation of this same window changed before a /clear
 
 On SessionEnd it releases the locks this window still holds, so a session that exits cleanly
 doesn't leave locks behind (a crash still can: those go ⚠stale after SLOG_STALE_HOURS and stop
@@ -28,9 +29,9 @@ CHANGED_HOURS = 12   # cr-hist: what other sessions changed recently (only if th
 CHANGED_MAX = 10
 
 
-def run(args, cwd=None):
+def run(args, cwd=None, env=None):
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=10, cwd=cwd)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10, cwd=cwd, env=env)
         return r.stdout.strip() if r.returncode == 0 else ""
     except Exception:
         return ""
@@ -65,7 +66,10 @@ def session_start(ev):
     feed = [l.split(" · s:")[0] for l in tail.splitlines() if l.strip() and not l.startswith("#")][-FEED:]
     if feed:
         parts.append("Recent board feed:\n" + "\n".join(feed))
-    hist = run([os.path.join(BIN, "cr-hist"), "changed", str(CHANGED_HOURS)], cwd=cwd)
+    # cr-hist hides only THIS conversation's commits (Session: trailer), so after /clear the session
+    # still sees what its own window's earlier conversation changed
+    hist = run([os.path.join(BIN, "cr-hist"), "changed", str(CHANGED_HOURS)], cwd=cwd,
+               env={**os.environ, "CLAUDE_CODE_SESSION_ID": ev.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")})
     if hist and not hist.startswith("("):
         lines = hist.splitlines()
         more = f"\n… {len(lines) - CHANGED_MAX} more: cr-hist changed {CHANGED_HOURS}" if len(lines) > CHANGED_MAX else ""

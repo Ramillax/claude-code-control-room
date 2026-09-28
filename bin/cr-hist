@@ -71,8 +71,17 @@ case "$CMD" in
   changed)
     W=$(find_repo); hours="${1:-24}"
     me="${SLOG_TAG:-$( [ -n "${TMUX:-}" ] && tmux display-message -p '#S' 2>/dev/null || echo '')}"
-    out=$(H log --since="$hours hours ago" --date=format:'%m-%d %H:%M' --format="$FMT" | grep -v '  baseline:' | pretty || true)
-    [ -n "$me" ] && out=$(printf '%s\n' "$out" | grep -vE "  $me(/bash)?  " || true)
+    # "Yours" means this CONVERSATION (the Session: trailer), not this tmux window: after /clear the
+    # window is the same but the memory isn't, so what the earlier conversation changed must show up.
+    # Without CLAUDE_CODE_SESSION_ID (a human at the prompt) it falls back to hiding the window's commits.
+    sid="${CLAUDE_CODE_SESSION_ID:-}"
+    out=$(H log --since="$hours hours ago" --date=format:'%m-%d %H:%M' \
+            --format="$FMT%x1f%(trailers:key=Session,valueonly,separator=)" | grep -v '  baseline:' |
+          awk -F '\037' -v sid="$sid" -v me="$me" '
+            { mine = me != "" && (index($1, "auto(" me "): ") || index($1, "auto(" me "/bash): ")) }
+            sid != "" && $2 == sid { next }
+            sid == "" && mine      { next }
+            { print $1 (mine ? "  ← this window, earlier conversation" : "") }' | pretty || true)
     if [ -z "$out" ]; then echo "(nothing changed by other sessions in the last ${hours}h)"; else printf '%s\n' "$out" | head -n 60; fi
     ;;
   who)
