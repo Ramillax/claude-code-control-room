@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-statusline.py"
+  },
   "hooks": {
     "SessionStart": [
       {

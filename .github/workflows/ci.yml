@@ -20,7 +20,7 @@ jobs:
           for f in $files; do bash -n "$f"; done
           shellcheck --severity=error $files
       - name: python compiles
-        run: python3 -m py_compile server/server.py hooks/cr-state-hook.py hooks/cr-guard-hook.py hooks/cr-context-hook.py hooks/cr-history-hook.py bin/skill-lint
+        run: python3 -m py_compile server/server.py server/chat.py hooks/cr-statusline.py hooks/cr-state-hook.py hooks/cr-guard-hook.py hooks/cr-context-hook.py hooks/cr-history-hook.py bin/skill-lint
       - name: skill-lint on the bundled skills
         run: python3 bin/skill-lint skills
 
@@ -41,6 +41,12 @@ jobs:
           curl -fsS -o /dev/null "http://127.0.0.1:7680/tty/?arg=shell"             # ttyd through the proxy
           code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7680/dl?p=/etc/passwd")
           [ "$code" != 200 ] || { echo "file browser served a path outside CR_FILE_ROOTS"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7680/view?p=/etc/passwd")
+          [ "$code" != 200 ] || { echo "viewer served a path outside CR_FILE_ROOTS"; exit 1; }
+          curl -fsS -o chat.js.out  http://127.0.0.1:7680/chat.js  && grep -q 'pollChat' chat.js.out   # the Chat view
+          curl -fsS -o chat.css.out http://127.0.0.1:7680/chat.css && grep -q 'cperm' chat.css.out
+          curl -fsS "http://127.0.0.1:7680/api/chat?s=shell" | python3 -c 'import json,sys; json.load(sys.stdin)'
+          curl -fsS http://127.0.0.1:7680/api/usage | python3 -c 'import json,sys; json.load(sys.stdin)'
           cat "$RUNNER_TEMP/cr.log"
       - name: slog locks (hierarchical conflict)
         run: |
@@ -50,5 +56,5 @@ jobs:
           SLOG_TAG=bob   bin/slog take api 2>&1 | tee out.txt
           grep -qi 'overlap\|conflict\|held' out.txt
           bin/slog locks
-      - name: behavior tests (lock guard, context hook, notes, exclusive, history, permission badge)
+      - name: behavior tests (lock guard, context hook, notes, exclusive, history, permission badge, chat view)
         run: bash tests/run.sh

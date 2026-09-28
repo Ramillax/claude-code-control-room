@@ -6,9 +6,9 @@
 
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
 
-![Six sessions in the control room: two agents collide on a lock, one waits for permission, the board shows who holds what](docs/demo.png)
+![Six sessions in Chat view: one waits for permission and shows the exact command it wants to run, one got a screenshot and a PDF, one is at the shell; the board shows who holds which lock, and any tile flips back to its live terminal](docs/demo.png)
 
-<sub>Staged demo: real Claude Code first-run screens and real <code>slog</code> commands; the state events were fired by hand.</sub>
+<sub>Staged demo: synthetic conversations for a made-up <code>acme-api</code> project and real <code>slog</code> commands; the state events were fired by hand.</sub>
 
 **The idea: give Claude Code its own machine.** Run it on a VPS or a sandbox box, not on your laptop, let it work with broad permissions there, and drive it from anywhere: your desk, your phone, a train. The worst a session can break is that box, which is what makes long unattended runs and auto mode reasonable. The control room is how you watch and steer it.
 
@@ -22,17 +22,19 @@ Three layers, one idea: **several agents working on the same project without ste
 
 What you get:
 
+- **A chat view on every tile, with the terminal still underneath.** Each session reads like a chat app: markdown, tables, code with a Copy button, and every tool call folded into one line per group with the **real command as a grey hint**, so it stays as dense as a terminal. When Claude asks for permission, a card shows **exactly what it wants to run** (the full command, or the diff for an edit) with one button per option. A message box with paste/drop for images and PDFs (previewed before sending), Claude's animated working line, "send now" to interrupt with a queued message, and a clear card when a tile has no Claude running. One tap on **Term** and the real terminal is there, never restarted. See [The Chat view](#the-chat-view).
 - **Live state per session**: working, idle, or **waiting for your permission**. It comes from Claude Code's own hook events, not from screen-scraping, so it doesn't break when the CLI's UI changes. A red badge in the top bar takes you straight to the session that needs you, and it clears whether you answer yes, no or Esc (no hook fires on a "no", so the server confirms it on screen; see [below](#the-permission-badge-and-the-no-case)).
 - **`slog`, a shared board with hierarchical locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds. Locks are advisory by default; tie one to files with `--paths` and a hook **enforces** it: other sessions get their edits to those files denied.
 - **Every session starts informed**: a SessionStart hook injects the live locks, the recent feed, the files other sessions just changed and the project's notes (done / next / don't redo) into each new session, also after `/clear` and compaction. Nobody has to remember to run `slog status`.
 - **History by session**: every file a session writes is committed on its own, labeled with the session and its transcript id, in a shadow git repo that never touches your project's `.git`. `cr-hist changed` answers "what did the other sessions change?", `cr-hist who <file>` leads to the conversation that made a change.
-- **Built for the phone**: an on-screen key bar (Esc, arrows, Tab, Ctrl-C, and `mode` to switch Claude Code between normal, plan and auto mode), swipe to scroll history, tap-to-jump between sessions.
-- **Files both ways**: upload, drag & drop, or **paste a screenshot with Ctrl-V**. The path gets typed into the session's prompt. The download dialog opens on an outbox where agents drop things for you.
-- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap. On a phone this is *the* way to copy: selecting text inside a terminal doesn't work well there.
+- **Mode and plan usage at a glance**: each tile shows Claude Code's permission mode (auto / accept edits / plan / manual; **tap it to switch**, like Shift+Tab) and how much context the conversation uses. The top bar shows your plan's **5-hour session and weekly usage** with their reset times, read from a silent status line.
+- **Built for the phone**: the Chat view is plain web text, so you select and scroll with your finger; in Term, an on-screen key bar (Esc, arrows, Tab, Ctrl-C), swipe to scroll history, tap-to-jump between sessions. The header fits one row.
+- **Files both ways**: paste a screenshot with **Ctrl-V**, drop files, or use 📎; images and PDFs show as thumbnails in the chat and open large in an **in-page viewer**, including the ones Claude reads or links with `![](path)`. When Claude hands you a file, it shows up **in the chat as a Download card** (name, size, one tap), as long as the path it wrote exists inside `CR_FILE_ROOTS`; the download dialog still opens on the outbox where agents drop things for you.
+- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. On a phone this is *the* way to copy from a terminal.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
 - **Skills that survive the session**: a 3-layer structure (router / current state / decision log), a `skill-sync` skill that consolidates each session's findings before it closes, and `skill-lint` to catch what parallel sessions break (duplicate changelog ids, dead pointers, bloated routers).
 
-No frameworks, no build step, no `npm install`: Python standard library, bash, and one HTML file.
+No frameworks, no build step, no `npm install`: Python standard library, bash, and one HTML page with its script and stylesheet.
 
 > Community project, not affiliated with or endorsed by Anthropic. "Claude" and "Claude Code" are trademarks of Anthropic.
 
@@ -248,6 +250,18 @@ shell      shell
 
 A "yes" to a permission prompt runs the tool and fires `PostToolUse`, which clears the badge. A "no", Esc or Ctrl-C fires **no hook at all** (`PermissionDenied` exists, but only for auto-mode classifier denials), so a hook-only badge stays red until your next prompt. The server closes that gap by looking at the session's pane: once it has seen the permission box on screen for the current prompt, the box disappearing means you answered. The screen is only used to *leave* the waiting state, never to enter it, and only after it has confirmed the box once, so if a Claude Code update changes how the box looks, you're simply back to hook-only behavior instead of missing an alert.
 
+## The Chat view
+
+Every tile has a **Chat / Term** switch (remembered per tile). Chat is a layer **on top of** the terminal: the tmux session and its terminal keep running underneath at their real size, so switching is instant and nothing restarts.
+
+- **Where the conversation comes from.** Claude Code writes each session's transcript to `~/.claude/projects/<project>/<id>.jsonl`. The state hook records that path on every event, and so does the silent status line (`hooks/cr-statusline.py`); the server reads the newest one, so the view follows `/clear`, `/resume` and compaction by itself. Reads are incremental (by byte offset) and only the tail is loaded at first. Without the hooks there is no Chat view for that tile; Term always works.
+- **Permission card.** Claude Code writes the tool call to the transcript *before* it asks, so the card shows the pending step (the whole command, or the diff) and marks it "waiting for your OK"; if it isn't there yet, it shows the box as it is on screen. Options that the terminal UI wraps across lines are joined back. The buttons send the option's key to the session (a whitelist: digits, Esc, Enter, Shift+Tab).
+- **Writing.** The message box pastes your text with bracketed paste (line breaks don't submit it halfway) and presses Enter. Attachments are saved to `uploads/` and Claude gets their paths after your text. Sending uses a navigational form into a hidden frame, never XHR, like the uploads (auth proxies can kill background POSTs). It is exactly as powerful as typing in the terminal: same auth, same sessions (`CR_SESSIONS`).
+- **Working line.** While Claude works, the chat shows its own animated line (`✻ Refactoring… (1m 12s · ↓ 6.8k tokens)`), read from the screen.
+- **Send now.** A message you send while Claude works is queued (gray). "send now" interrupts (Esc) and then presses Enter, which sends it if Claude put it back in the prompt; if Claude had already sent it, the Enter lands on an empty prompt and does nothing.
+- **No Claude in the tile.** If the tile is at the shell (Claude exited) or running another program (ssh, vim…), the chat says so, offers **Start Claude** / **Continue the last conversation** / **Go to Term**, and locks the message box, since anything typed there would go to that program.
+- **Known limit.** The transcript is written per message, not per token, so a reply appears whole when each block finishes. Token-by-token streaming is in Term.
+
 ## Skills: knowledge that survives the session
 
 The board is ephemeral on purpose. What a session *learned* (how a subsystem really works, why a decision was made, which trap it fell into) has to land somewhere durable before the session closes, or the next one starts cold and re-discovers it. With several sessions writing that knowledge in parallel, it rots fast unless there are rules. These rules come from real incidents:
@@ -315,8 +329,9 @@ Optional: `CR_STT_LANGUAGE=en` and `CR_STT_PROMPT="Postgres, Kubernetes, YourPro
 
 ## On the phone
 
-- The key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). `mode` = Shift+Tab: cycles Claude Code's permission mode, handy when auto mode can't run and you need a session to ask you instead. **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
-- **Copying**: ask the agent to put it in the clip (`cr-clip`), then tap 📋. Selecting text inside the terminal is unreliable on touch screens, so don't count on it. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
+- In Chat, the message box is the keyboard and the key bar shrinks to two compact rows: esc and ^C to stop Claude, 🎤, and arrows + ⏎ to move through Claude's menus (they go straight to tmux). In Term, the full key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
+- **Switching mode**: tap the mode pill on the tile (auto / plan / …); it sends Shift+Tab, handy when auto mode can't run and you need a session to ask you instead.
+- **Copying**: in Chat, select the text with your finger like on any web page. In Term, ask the agent to put it in the clip (`cr-clip`), then tap 📋: selecting text inside a terminal is unreliable on touch screens. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
 - If the 🎤 fails with `NotAllowedError` while the site permission is granted, the block is at the OS level, or it's a `Permissions-Policy` header from your proxy, which must allow `microphone=(self)`.
 
 ## What's in the box
@@ -335,8 +350,11 @@ bin/
   cr-clip / cr-expose      hand text / files to the human
   skill-new / skill-lint   scaffold and check skills
 server/server.py           UI, /tty proxy, status API, files, dictation (Python stdlib only)
-web/index.html             the grid (one file, no build)
-hooks/cr-state-hook.py     Claude Code hook → per-session state
+server/chat.py             the Chat view: transcript reader, permission card, send, plan usage
+web/index.html             the grid (no build)
+web/chat.js · chat.css     the Chat view, viewer, usage meters, warm theme
+hooks/cr-state-hook.py     Claude Code hook → per-session state (+ transcript path for the Chat view)
+hooks/cr-statusline.py     silent statusLine → plan usage (5 h / week) + context % for the UI
 hooks/cr-guard-hook.py     denies edits to files another session has locked
 hooks/cr-context-hook.py   board + notes + recent changes into every new session; frees locks on exit
 hooks/cr-history-hook.py   commits each file a session writes into the project's history

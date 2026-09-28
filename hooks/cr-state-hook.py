@@ -83,6 +83,8 @@ def main():
         return
     data = {"state": st, "ts": int(time.time()), "event": ev.get("hook_event_name", ""),
             "claude_session_id": ev.get("session_id", ""),
+            # every hook event carries it: the Chat view reads this session's conversation from here
+            "transcript": ev.get("transcript_path", ""),
             # the exact pane Claude runs in, so the server can confirm "blocked" on screen
             "pane": os.environ.get("TMUX_PANE", "")}
     tmp = path + ".tmp"

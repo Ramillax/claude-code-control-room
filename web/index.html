@@ -152,10 +152,11 @@
 
   @media (max-width:760px){ #keybar{display:flex} }
 </style>
+<link rel="stylesheet" href="chat.css">
 </head>
 <body>
 <header>
-  <div class="brand"><span class="dot"></span> Claude Code Control Room</div>
+  <div class="brand"><span class="dot">✻</span><span class="bt">&nbsp;Claude Code Control Room</span></div>
   <div class="seg" id="layout">
     <button data-n="1">1</button><button data-n="2">2</button><button data-n="4">4</button><button data-n="6">6</button>
   </div>
@@ -168,9 +169,14 @@
     <button type="button" id="clipbtn" title="copy the text an agent left with cr-clip">📋 clip</button>
   </div>
   <div class="spacer"></div>
-  <div class="hint">every tile is a live <b>tmux</b> session · closing the browser only detaches</div>
+  <div id="usage" title="your Claude plan usage, as Claude Code reports it to its status line"></div>
 </header>
 <main id="grid" data-cols="2"></main>
+<!-- Chat composer posts here (navigational form, never XHR); the in-page image/PDF viewer -->
+<iframe name="chatsink" hidden title="chat send"></iframe>
+<div id="lightbox" role="dialog" aria-modal="true"><div class="lbbar"><span class="lbname"></span>
+  <a class="lbopen" target="_blank" rel="noopener">open in a tab</a><button type="button" class="lbx" title="close (Esc)">✕</button></div>
+  <div class="lbbody"></div></div>
 <div id="keybar">
   <button type="button" class="kchip" id="winbtn" title="jump to another tile">⌨ <b id="kbsess">—</b><span class="caret">⌄</span></button>
   <button class="stop" data-key="esc" title="Esc — stop Claude / cancel">esc</button>
@@ -182,7 +188,6 @@
   <button data-key="susp"  data-confirm="1" title="suspend to the shell (Ctrl-Z) — double tap; come back with fg">^Z</button>
   <button data-act="fg"    data-confirm="1" title="fg — resume the suspended app — double tap">fg</button>
   <button data-key="tab"   title="Tab — autocomplete">tab</button>
-  <button data-key="mode"  title="Shift+Tab — switch Claude Code's mode: normal → accept edits → plan → auto">mode</button>
   <button data-key="enter" title="Enter — send">⏎</button>
   <button data-act="board" title="slog board">🗂</button>
   <button data-act="clip"  title="copy the text an agent left with cr-clip">📋 copy</button>
@@ -364,6 +369,13 @@ function setActive(idx){
   activeIdx = idx;
   tilesArr().forEach((t,i)=> t.classList.toggle("focus", i===idx));
   document.getElementById("kbsess").textContent = sessOf(idx);
+  syncChatBar();
+}
+// On a phone the key bar is for Term: in Chat it covered the message box.
+function syncChatBar(){
+  const t = tilesArr()[activeIdx];
+  document.body.classList.toggle("chatmode", !!t && t.dataset.mode === "chat");
+  try{ fitBar(); }catch(e){}                             // may run before the key bar exists
 }
 function termEl(ifr){
   try{ const w = ifr.contentWindow; return [w, w.document.querySelector(".xterm-helper-textarea") || w.document.querySelector(".terminal")]; }
@@ -437,7 +449,15 @@ if(window.visualViewport){
     e.preventDefault();                                  // don't steal focus, no double-tap zoom
     if(b.dataset.confirm){ if(!confirmTap(b)) return; } else disarm();
     btn = b; b.classList.add("pressed");
-    sendKey(b.dataset.key);
+    // esc and ^C go through the SERVER (tmux send-keys), not as a key simulated inside xterm: the
+    // simulated Esc didn't interrupt Claude, tmux's does. Works in Chat and in Term alike.
+    const SRV = {esc:"Escape", ctrlc:"C-c"};
+    // in Chat, arrows and Enter go through tmux too (the xterm underneath has no focus); in Term, through xterm (hold to repeat)
+    const CHAT = {up:"Up", down:"Down", left:"Left", right:"Right", enter:"Enter"};
+    const chatMode = document.body.classList.contains("chatmode");
+    if(SRV[b.dataset.key]) chatSend(activeIdx, {key: SRV[b.dataset.key]});
+    else if(chatMode && CHAT[b.dataset.key]){ chatSend(activeIdx, {key: CHAT[b.dataset.key]}); return; }
+    else sendKey(b.dataset.key);
     if(b.dataset.rep) holdT = setTimeout(()=>{ repT = setInterval(()=>sendKey(b.dataset.key), 110); }, 380);   // hold to repeat
   });
   ["pointerup","pointercancel","pointerleave"].forEach(ev=> bar.addEventListener(ev, stop));
@@ -694,6 +714,11 @@ function tileEl(idx){
   bar.innerHTML =
     `<span class="st" title="state"></span>
      <select>${SESSIONS.map(s=>`<option value="${esc(s)}"${s===sess?" selected":""}>${esc(s)}</option>`).join("")}</select>
+     <span class="stlabel"></span>
+     <span class="mode" title="tap to switch mode (Shift+Tab): normal → accept edits → plan → auto"></span>
+     <span class="ctx" title="context used by this conversation"></span>
+     <span class="conn" title="the terminal lost its connection — it reconnects on its own; tap to do it now">⟳ disconnected</span>
+     <span class="mseg"><button type="button" data-m="chat">Chat</button><button type="button" data-m="term">Term</button></span>
      <span class="locks"></span>
      <span class="tspacer"></span>
      <button data-act="up" title="upload files to this session (or drop them on it)">📎</button>
@@ -704,7 +729,7 @@ function tileEl(idx){
   ifr.src = TTY(sess); ifr.setAttribute("allow", "clipboard-read; clipboard-write");
   wireIframe(ifr, idx);
   const sel = bar.querySelector("select");
-  sel.onchange = ()=>{ state.tiles[idx] = sel.value; save(); ifr.src = TTY(sel.value); if(idx===activeIdx) setActive(idx); paintStatus(); };
+  sel.onchange = ()=>{ state.tiles[idx] = sel.value; save(); ifr.src = TTY(sel.value); if(idx===activeIdx) setActive(idx); paintStatus(); pollChat(idx); paintUsage(); };
   bar.querySelector('[data-act="up"]').onclick = ()=>{ setActive(idx); openUpload(sel.value); };
   bar.querySelector('[data-act="reload"]').onclick = ()=>{ ifr.src = TTY(sel.value); };
   // F12 is bound to `clear-history` in the example tmux.conf
@@ -714,7 +739,19 @@ function tileEl(idx){
     e.target.textContent = tile.classList.contains("full") ? "✕" : "⤢";
     setActive(idx);
   };
-  tile.append(bar, ifr);
+  // Chat view ON TOP of the terminal (see chat.js): the terminal keeps running underneath at its real size
+  state.modes = state.modes || {};
+  const setMode = m => { tile.dataset.mode = m; state.modes[idx] = m; save(); if(idx === activeIdx) syncChatBar();
+    bar.querySelectorAll(".mseg button").forEach(b=> b.classList.toggle("on", b.dataset.m === m));
+    if(m === "chat") pollChat(idx); else { try{ ifr.contentWindow.focus(); }catch(e){} } };
+  bar.querySelectorAll(".mseg button").forEach(b=> b.onclick = ()=>{ setMode(b.dataset.m); setActive(idx); });
+  const body = document.createElement("div"); body.className = "tbody";
+  const chat = document.createElement("div"); chat.className = "chat"; chat.innerHTML = chatHTML();
+  chat.addEventListener("pointerdown", ()=> setActive(idx));
+  body.append(ifr, chat);
+  tile.append(bar, body);
+  wireChat(tile, idx);
+  setMode(state.modes[idx] || "chat");
   return tile;
 }
 function render(){
@@ -746,6 +783,8 @@ function jumpToSession(sess){
 }
 const notif = document.getElementById("notif");
 notif.addEventListener("click", e=>{ const b = e.target.closest("button[data-jump-sess]"); if(b) jumpToSession(b.dataset.jumpSess); });
+const ST_TEXT = {working:"working", blocked:"needs you"};
+const MODE_TEXT = {auto:"auto", "accept-edits":"accept edits", plan:"plan", normal:"manual"};
 const STATE_LABEL = {working:"working", blocked:"WAITING FOR YOUR PERMISSION", idle:"idle — waiting for a prompt",
                      shell:"shell", off:"not started (opens on first view)", unknown:"no hook events yet"};
 function paintStatus(){
@@ -754,6 +793,9 @@ function paintStatus(){
     const s = by[sessOf(i)] || {state:"unknown", locks:[]};
     const dot = t.querySelector(".st");
     dot.dataset.s = s.state; dot.title = STATE_LABEL[s.state] || s.state;
+    t.dataset.state = s.state;
+    t.querySelector(".stlabel").textContent = ST_TEXT[s.state] || "";
+    const md = t.querySelector(".mode"); md.textContent = MODE_TEXT[s.mode] || ""; md.className = "mode " + (s.mode || "");
     t.querySelector(".locks").innerHTML = (s.locks || []).map(k=> `<span class="lk" title="holds lock ${esc(k)}">🔒 ${esc(k)}</span>`).join("");
   });
   const blocked = STATUS.blocked || [];
@@ -777,5 +819,6 @@ document.body.classList.add("nostt");                    // hidden until the ser
 pollStatus().finally(()=>{ if(!grid.children.length) render(); });
 setInterval(pollStatus, 3000);
 </script>
+<script src="chat.js"></script>
 </body>
 </html>

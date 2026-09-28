@@ -4,7 +4,8 @@
 #   ./install.sh                         check dependencies + create controlroom.env
 #   ./install.sh --workdir ~/myproject   …and point new sessions at your project
 #   ./install.sh --all                   …plus the three optional steps below
-#     --hooks    add the hooks (state, lock guard, session context, history) to ~/.claude/settings.json
+#     --hooks    add the hooks (state, lock guard, session context, history) and the silent
+#                statusLine (plan usage for the UI) to ~/.claude/settings.json
 #                (backup: settings.json.bak-<date>)
 #     --skills   install the skill-sync skill into ~/.claude/skills/
 #     --tmux     append the recommended settings to ~/.tmux.conf (once, between markers)
@@ -96,6 +97,13 @@ for script, ev, matcher in WANT:
         g["matcher"] = matcher
     groups.append(g)
     added += 1
+# Silent statusLine: plan usage (session / week) + context % for the UI. Never replace one you already have.
+sl = data.get("statusLine")
+if not sl:
+    data["statusLine"] = {"type": "command", "command": "python3 " + os.path.join(hooks_dir, "cr-statusline.py")}
+    added += 1
+elif "cr-statusline.py" not in (sl.get("command") or ""):
+    print("  \033[33m!\033[0m you already have a statusLine: plan usage in the UI needs cr-statusline.py fed the same stdin (see its header)")
 with open(path, "w") as fh:
     json.dump(data, fh, indent=2)
     fh.write("\n")

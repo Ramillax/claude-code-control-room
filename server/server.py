@@ -31,6 +31,9 @@ from email.parser import BytesParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import chat   # Chat view per tile + plan usage
+
 # ── Configuration (all from the environment; start.sh loads controlroom.env) ────────────
 HERE      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 E         = os.environ.get
@@ -50,12 +53,14 @@ TTYD_SOCK  = E("CR_TTYD_SOCKET") or os.path.join(STATE_DIR, "ttyd.sock")
 SESSIONS   = (E("CR_SESSIONS") or "claude1 claude2 claude3 claude4 shell").split()
 SHELLS     = (E("CR_SHELL_SESSIONS") or "shell").split()
 TMUX       = ["tmux"] + (["-L", E("CR_TMUX_SOCKET")] if E("CR_TMUX_SOCKET") else [])
+VIEW_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}
 
 # Browsable roots (realpath). Anything outside -> 404, even if it exists.
 ALLOWED_ROOTS = [os.path.realpath(os.path.expanduser(p)) for p in
                  (E("CR_FILE_ROOTS") or ":".join([WORKDIR, DATA_DIR, OUTBOX])).split(":") if p]
 # Deletable = only what the control room itself creates.
 DELETE_ROOTS = [os.path.realpath(p) for p in (UPLOAD_DIR, OUTBOX)]
+chat.init(TMUX, STATE_DIR, ALLOWED_ROOTS)
 
 MAX_BODY  = 200 * 1024 * 1024
 MAX_LIST  = 300
@@ -281,7 +286,7 @@ def status():
             st = "shell"
         else:
             st = effective_state(s)
-        sessions.append({"name": s, "state": st,
+        sessions.append({"name": s, "state": st, "mode": chat.pane_mode(s) if st not in ("off", "shell") else "",
                          "locks": [l["key"] for l in locks if l["owner"] == s]})
     return {"sessions": sessions, "locks": locks, "feed": slog_feed(),
             "blocked": [x["name"] for x in sessions if x["state"] == "blocked"],
@@ -473,32 +478,33 @@ def splice(a, b):
 PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
- body{{margin:0;padding:10px 12px;background:#11151f;color:#cdd6f4;
-      font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
- .ok{{color:#3ddc97}} .warn{{color:#d97757}} .muted{{color:#7c89a8}}
- code{{background:#0b0e14;border:1px solid #222a3a;border-radius:5px;padding:1px 5px;word-break:break-all}}
+ body{{margin:0;padding:10px 12px;background:#262624;color:#ece9e1;
+      font:13.5px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}}
+ code,pre,.mono{{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}}
+ .ok{{color:#9fca87}} .warn{{color:#d97757}} .muted{{color:#a19f97}}
+ code{{background:#1f1e1d;border:1px solid #3a3935;border-radius:5px;padding:1px 5px;word-break:break-all}}
  ul{{margin:6px 0;padding-left:18px}} li{{margin:4px 0}}
- a{{color:#8ab4ff;text-decoration:none}} a:hover{{text-decoration:underline}}
- .crumb{{color:#7c89a8;font-size:11.5px;word-break:break-all;margin:0 0 8px}}
+ a{{color:#e3a27f;text-decoration:none}} a:hover{{text-decoration:underline}}
+ .crumb{{color:#a19f97;font-size:11.5px;word-break:break-all;margin:0 0 8px}}
  .quick{{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}}
- .quick a{{background:#161b27;border:1px solid #222a3a;border-radius:7px;padding:6px 10px;color:#cdd6f4;font-size:12px}}
+ .quick a{{background:#2d2c29;border:1px solid #3a3935;border-radius:7px;padding:6px 10px;color:#ece9e1;font-size:12px}}
  .quick a.on{{border-color:#d97757;color:#d97757}}
- .row{{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid #1b2231}}
+ .row{{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid #34322f}}
  .row:last-child{{border-bottom:0}}
  .row .nm{{flex:1;min-width:0;overflow-wrap:anywhere}}
- .row .meta{{color:#7c89a8;font-size:11px;white-space:nowrap}}
- .dl{{flex:0 0 auto;background:#d97757;color:#1a1208;font-weight:700;border-radius:7px;padding:8px 13px}}
+ .row .meta{{color:#a19f97;font-size:11px;white-space:nowrap}}
+ .dl{{flex:0 0 auto;background:#d97757;color:#fff;font-weight:700;border-radius:7px;padding:8px 13px}}
  .dl:hover{{text-decoration:none;opacity:.9}}
  form.br{{display:flex;gap:6px;margin-top:12px}}
- form.br input{{flex:1;min-width:0;background:#0b0e14;border:1px solid #222a3a;color:#cdd6f4;
+ form.br input{{flex:1;min-width:0;background:#1f1e1d;border:1px solid #3a3935;color:#ece9e1;
                border-radius:7px;padding:9px;font:inherit;font-size:16px}}
- form.br button{{background:#161b27;border:1px solid #222a3a;color:#cdd6f4;border-radius:7px;padding:9px 12px;font:inherit;cursor:pointer}}
+ form.br button{{background:#2d2c29;border:1px solid #3a3935;color:#ece9e1;border-radius:7px;padding:9px 12px;font:inherit;cursor:pointer}}
  form.rmf{{display:inline;margin:0;flex:0 0 auto}}
- .rm{{background:#161b27;border:1px solid #3a2530;color:#e0708a;border-radius:7px;padding:8px 11px;font:inherit;font-size:12px;cursor:pointer}}
- .rm:hover{{border-color:#e0708a}}
- .note{{background:#131a1a;border:1px solid #24443a;border-radius:8px;padding:8px 10px;margin:0 0 10px}}
- .note.bad{{background:#1d1416;border-color:#4a2731}}
- .said{{background:#0b0e14;border:1px solid #222a3a;border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.55;color:#eef2ff;margin:0 0 8px}}
+ .rm{{background:#2d2c29;border:1px solid #5a3a33;color:#e5786d;border-radius:7px;padding:8px 11px;font:inherit;font-size:12px;cursor:pointer}}
+ .rm:hover{{border-color:#e5786d}}
+ .note{{background:#26302a;border:1px solid #3d5a44;border-radius:8px;padding:8px 10px;margin:0 0 10px}}
+ .note.bad{{background:#33241f;border-color:#6a3a33}}
+ .said{{background:#1f1e1d;border:1px solid #3a3935;border-radius:8px;padding:10px 12px;font-size:14px;line-height:1.55;color:#f5f1e8;margin:0 0 8px}}
  @media (max-width:640px){{ .row{{flex-wrap:wrap;gap:6px 9px}} .row .nm{{flex:1 0 100%}} .row .meta{{margin-right:auto}} }}
 </style></head><body{attrs}>{body}</body></html>"""
 
@@ -592,6 +598,16 @@ class Handler(SimpleHTTPRequestHandler):
             self.page_files(q); return True
         if route == "/dl":
             self.send_download(q); return True
+        if route == "/view":
+            self.send_view(q); return True
+        if route == "/api/chat":
+            try:
+                off = int((q.get("off") or ["0"])[0])
+            except ValueError:
+                off = 0
+            self._json(chat.get((q.get("s") or [""])[0], (q.get("sid") or [""])[0], off, SESSIONS)); return True
+        if route == "/api/usage":
+            self._json(chat.usage()); return True
         return False
 
     def do_GET(self):
@@ -612,7 +628,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self._is_tty():
             return self.proxy_ttyd()
         route = urlsplit(self.path).path.rstrip("/") or "/"
-        fn = {"/upload": self.handle_upload, "/rm": self.handle_rm, "/stt": self.handle_stt}.get(route)
+        fn = {"/upload": self.handle_upload, "/rm": self.handle_rm, "/stt": self.handle_stt,
+              "/chat/send": self.handle_chat_send}.get(route)
         if not fn:
             return self._page(404, "<p class='warn'>404</p>")
         try:
@@ -822,6 +839,82 @@ class Handler(SimpleHTTPRequestHandler):
         self._page(200, f"<div class='said'>🎤 {html.escape(text)}</div>{tail}", ok=typed)
 
     # ── 📎 upload ─────────────────────────────────────────────────────────────────────
+    def save_files(self, files, optimize=False):
+        """Save [(name, bytes)] to uploads/<day>/HHMMSS_<name> → [(path, human size, notes)]."""
+        destdir = os.path.join(UPLOAD_DIR, datetime.now().strftime("%Y-%m-%d"))
+        stamp = datetime.now().strftime("%H%M%S")
+        os.makedirs(destdir, exist_ok=True)
+        items = []
+        for fn, raw in files:
+            base, ext = os.path.splitext(sane_name(fn))
+            ext = ext.lower()
+            notes = []
+            if optimize and ext in IMG_EXTS:
+                raw, ext, note = optimize_image(raw, ext)
+                notes.append(note)
+            path = os.path.join(destdir, f"{stamp}_{base}{ext}")
+            i = 1
+            while os.path.exists(path):
+                path = os.path.join(destdir, f"{stamp}_{base}-{i}{ext}")
+                i += 1
+            with open(path, "wb") as fh:
+                fh.write(raw)
+            if ext == ".pdf":
+                notes += process_pdf(path, optimize)
+            items.append((path, human(os.path.getsize(path)), notes))
+        return items
+
+    # Chat composer: a navigational form POST into a hidden iframe (auth proxies can kill XHR POSTs).
+    # Attachments are saved to uploads/ and Claude receives their paths after the text.
+    def handle_chat_send(self):
+        if "multipart/form-data" in (self.headers.get("Content-Type") or ""):
+            msg, err = self._multipart(MAX_BODY)
+            if err:
+                return self._page(400, err)
+            q, files = {}, []
+            for part in msg.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                if name == "f":
+                    fn, payload = part.get_filename(), part.get_payload(decode=True)
+                    if fn and payload:
+                        files.append((fn, payload))
+                elif name:
+                    q[name] = [part.get_content() or ""]
+        else:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 200_000:
+                return self._page(413, "<p class='warn'>message too long</p>")
+            q, files = parse_qs(self.rfile.read(n).decode("utf-8", "replace"), keep_blank_values=True), []
+        g = lambda k: (q.get(k) or [""])[0]
+        text = g("text").strip()
+        if files:
+            paths = [p for p, _, _ in self.save_files(files)]
+            text = (text + "\n\n" if text else "") + "\n".join(paths)
+        ok = chat.send(g("s"), SESSIONS, text=text or None, key=g("key") or None)
+        self._page(200 if ok else 400, "<p class='ok'>✔</p>" if ok else "<p class='warn'>could not type into the session</p>", ok=ok)
+
+    # Like /dl but INLINE and only images/PDF: chat thumbnails and the in-page viewer use it.
+    def send_view(self, q):
+        raw = (q.get("p") or [""])[0]
+        ok, path = in_roots(raw)
+        ext = os.path.splitext(path or "")[1].lower()
+        if not raw or not ok or ext not in VIEW_TYPES or not os.path.isfile(path):
+            self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
+        size = os.path.getsize(path)
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(path)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", "inline")
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.end_headers()
+        if self._head:
+            return
+        with open(path, "rb") as fh:
+            try:
+                shutil.copyfileobj(fh, self.wfile)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
     def handle_upload(self):
         msg, err = self._multipart(MAX_BODY)
         if err:
@@ -842,28 +935,9 @@ class Handler(SimpleHTTPRequestHandler):
         if not files:
             return self._page(400, "<p class='warn'>✗ no file received</p>")
 
-        destdir = os.path.join(UPLOAD_DIR, datetime.now().strftime("%Y-%m-%d"))
-        stamp = datetime.now().strftime("%H%M%S")
-        os.makedirs(destdir, exist_ok=True)
-        items, paths = [], []
-        for fn, raw in files:
-            base, ext = os.path.splitext(sane_name(fn))
-            ext = ext.lower()
-            notes = []
-            if optimize and ext in IMG_EXTS:
-                raw, ext, note = optimize_image(raw, ext)
-                notes.append(note)
-            path = os.path.join(destdir, f"{stamp}_{base}{ext}")
-            i = 1
-            while os.path.exists(path):
-                path = os.path.join(destdir, f"{stamp}_{base}-{i}{ext}")
-                i += 1
-            with open(path, "wb") as fh:
-                fh.write(raw)
-            if ext == ".pdf":
-                notes += process_pdf(path, optimize)
-            paths.append(path)
-            items.append((path, human(os.path.getsize(path)), notes))
+        items = self.save_files(files, optimize)
+        paths = [p for p, _, _ in items]
+        destdir = os.path.dirname(paths[0])
 
         typed = typepath and sess and type_into_session(sess, " " + " ".join(paths) + " ")
         lis = "".join(
