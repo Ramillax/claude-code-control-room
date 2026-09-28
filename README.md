@@ -10,6 +10,8 @@
 
 <sub>Staged demo: real Claude Code first-run screens and real <code>slog</code> commands; the state events were fired by hand.</sub>
 
+**The idea: give Claude Code its own machine.** Run it on a VPS or a sandbox box, not on your laptop, let it work with broad permissions there, and drive it from anywhere: your desk, your phone, a train. The worst a session can break is that box, which is what makes long unattended runs and auto mode reasonable. The control room is how you watch and steer it.
+
 Three layers, one idea: **several agents working on the same project without stepping on each other**.
 
 | Layer | Answers | Lives in |
@@ -24,7 +26,7 @@ What you get:
 - **`slog`, a shared board with hierarchical locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds. Locks are advisory by default; tie one to files with `--paths` and a hook **enforces** it: other sessions get their edits to those files denied.
 - **Every session starts informed**: a SessionStart hook injects the live locks, the recent feed, the files other sessions just changed and the project's notes (done / next / don't redo) into each new session, also after `/clear` and compaction. Nobody has to remember to run `slog status`.
 - **History by session**: every file a session writes is committed on its own, labeled with the session and its transcript id, in a shadow git repo that never touches your project's `.git`. `cr-hist changed` answers "what did the other sessions change?", `cr-hist who <file>` leads to the conversation that made a change.
-- **Built for the phone**: an on-screen key bar (Esc, arrows, Tab, Ctrl-C…), swipe to scroll history, tap-to-jump between sessions.
+- **Built for the phone**: an on-screen key bar (Esc, arrows, Tab, Ctrl-C, and `mode` to switch Claude Code between normal, plan and auto mode), swipe to scroll history, tap-to-jump between sessions.
 - **Files both ways**: upload, drag & drop, or **paste a screenshot with Ctrl-V**. The path gets typed into the session's prompt. The download dialog opens on an outbox where agents drop things for you.
 - **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap. On a phone this is *the* way to copy: selecting text inside a terminal doesn't work well there.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
@@ -99,6 +101,8 @@ For always-on, see `examples/systemd/`, and **keep `KillMode=process`**. The tmu
 ---
 
 ## Security
+
+**Put it on a dedicated machine.** This is a shell with Claude's permissions behind a web page: don't run it on the computer that holds your personal accounts, keys or other people's data.
 
 **This project ships with NO authentication.** Whoever can open the page gets a shell running as your user, with whatever your Claude sessions can do.
 
@@ -311,7 +315,7 @@ Optional: `CR_STT_LANGUAGE=en` and `CR_STT_PROMPT="Postgres, Kubernetes, YourPro
 
 ## On the phone
 
-- The key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
+- The key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). `mode` = Shift+Tab: cycles Claude Code's permission mode, handy when auto mode can't run and you need a session to ask you instead. **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
 - **Copying**: ask the agent to put it in the clip (`cr-clip`), then tap 📋. Selecting text inside the terminal is unreliable on touch screens, so don't count on it. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
 - If the 🎤 fails with `NotAllowedError` while the site permission is granted, the block is at the OS level, or it's a `Permissions-Policy` header from your proxy, which must allow `microphone=(self)`.
 

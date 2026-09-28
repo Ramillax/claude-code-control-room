@@ -181,7 +181,8 @@
   <button data-key="clear" data-confirm="1" title="clear the prompt (Ctrl-U) — double tap">clr</button>
   <button data-key="susp"  data-confirm="1" title="suspend to the shell (Ctrl-Z) — double tap; come back with fg">^Z</button>
   <button data-act="fg"    data-confirm="1" title="fg — resume the suspended app — double tap">fg</button>
-  <button data-key="tab"   title="Tab — autocomplete / mode">⇥</button>
+  <button data-key="tab"   title="Tab — autocomplete">tab</button>
+  <button data-key="mode"  title="Shift+Tab — switch Claude Code's mode: normal → accept edits → plan → auto">mode</button>
   <button data-key="enter" title="Enter — send">⏎</button>
   <button data-act="board" title="slog board">🗂</button>
   <button data-act="clip"  title="copy the text an agent left with cr-clip">📋 copy</button>
@@ -351,6 +352,7 @@ const KEYS = {
   esc:{key:"Escape",code:"Escape",kc:27}, up:{key:"ArrowUp",code:"ArrowUp",kc:38},
   down:{key:"ArrowDown",code:"ArrowDown",kc:40}, left:{key:"ArrowLeft",code:"ArrowLeft",kc:37},
   right:{key:"ArrowRight",code:"ArrowRight",kc:39}, tab:{key:"Tab",code:"Tab",kc:9},
+  mode:{key:"Tab",code:"Tab",kc:9,shift:true},   // Shift+Tab: cycles Claude Code's mode (normal → accept edits → plan → auto)
   enter:{key:"Enter",code:"Enter",kc:13}, ctrlc:{key:"c",code:"KeyC",kc:67,ctrl:true},
   clear:{key:"u",code:"KeyU",kc:85,ctrl:true},   // Ctrl-U clears Claude's prompt (Escape does not)
   susp:{key:"z",code:"KeyZ",kc:90,ctrl:true},    // Ctrl-Z SUSPENDS to the shell (not undo!) — `fg` resumes
@@ -373,7 +375,7 @@ function sendKeyTo(ifr, spec){
   if(!ifr || !spec) return;
   const [win, el] = termEl(ifr); if(!win || !el) return;
   const ev = new win.KeyboardEvent("keydown", {key:spec.key, code:spec.code, view:win, bubbles:true, cancelable:true,
-                                               ctrlKey:!!spec.ctrl, altKey:false, shiftKey:false, metaKey:false});
+                                               ctrlKey:!!spec.ctrl, altKey:false, shiftKey:!!spec.shift, metaKey:false});
   Object.defineProperty(ev, "keyCode", {get:()=>spec.kc});
   Object.defineProperty(ev, "which",   {get:()=>spec.kc});
   const hadFocus = (win.document.activeElement === el);
