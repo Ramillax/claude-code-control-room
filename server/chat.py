@@ -134,6 +134,11 @@ def _events(lines):
         c = (e.get("message") or {}).get("content")
         if isinstance(c, str):
             c = _strip(c)
+            m = re.search(r"<command-name>(/[^<]+)</command-name>", c)
+            if m:                                   # a /skill or /clear you typed: a visible chip in the chat
+                a = re.search(r"<command-args>(.*?)</command-args>", c, re.S)
+                out.append({"k": "cmd", "name": m.group(1).strip(), "args": (a.group(1).strip() if a else "")[:200], "ts": ts})
+                continue
             if c and not c.startswith(("<command-", "<local-command")):
                 out.append({"k": "user", "text": c, "ts": ts})
             continue

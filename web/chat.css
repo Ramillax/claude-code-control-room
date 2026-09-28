@@ -203,6 +203,13 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
 .dlcard .dn b{font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dlcard .dn small{color:var(--muted);font-size:11px}
 .dlcard .dl{flex:0 0 auto;background:var(--accent);color:#fff;font:600 12px system-ui;padding:5px 10px;border-radius:999px}
+/* skills: the one Claude loads (✦ Skill: x) and the one you invoke (/x) — clearly visible, never folded */
+.skillchip{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;padding:3px 11px 3px 8px;border-radius:999px;
+  border:1px solid rgba(182,156,240,.5);background:rgba(182,156,240,.12);color:#d9ccff;font-size:12.5px;margin:2px 0}
+.skillchip b{color:#fff;font-weight:600}
+.skillchip .sk-ic{color:#c3a8ff;font-size:13px}
+.skillchip .sk-a{color:var(--muted);max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skillchip.user{align-self:flex-end;background:rgba(182,156,240,.2)}
 .shellnote{margin:auto;color:var(--muted);text-align:center;padding:20px;font-size:13px}
 /* dialogs (upload / download / dictation / board): same look as the chat — normal font, pills, soft edges */
 .box{font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.6)}

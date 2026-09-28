@@ -177,6 +177,15 @@ function addEvent(msgs, e){
         x = prev;
       }
     }
+  } else if(e.k === "cmd"){                            // a /skill or /clear you typed
+    const d = document.createElement("div"); d.className = "skillchip user";
+    const builtin = /^\/(clear|compact|resume|model|exit|login|logout|config|status|help)\b/.test(e.name);
+    d.innerHTML = `<span class="sk-ic">${builtin ? "↺" : "✦"}</span><b>${esc(e.name)}</b>${e.args ? ` <span class="sk-a">${esc(e.args)}</span>` : ""}`;
+    msgs.append(d);
+  } else if(e.k === "tool" && e.name === "Skill"){       // Claude loads a skill: its own chip, not folded into the steps
+    const i = e.input || {}, d = document.createElement("div"); d.className = "skillchip";
+    d.innerHTML = `<span class="sk-ic">✦</span>Skill: <b>${esc(i.skill || "?")}</b>${i.args ? ` <span class="sk-a">${esc(String(i.args).slice(0,120))}</span>` : ""}`;
+    msgs.append(d);
   } else if(e.k === "tool"){
     let g = last && last.classList.contains("grp") ? last :
             (last && last.classList.contains("toolatt") && last.previousElementSibling &&
