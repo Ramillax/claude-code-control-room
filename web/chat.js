@@ -160,6 +160,8 @@ function addEvent(msgs, e){
     msgs.append(d);
   } else if(e.k === "asst" && /^(You've hit your|API Error|Claude usage limit)/.test(e.text)){
     const d = document.createElement("div"); d.className = "note"; d.textContent = "⚠ " + e.text; msgs.append(d);
+  } else if(e.k === "think"){                       // thinking the terminal shows too: muted, but not hidden
+    const d = document.createElement("div"); d.className = "m-a think"; d.innerHTML = md(e.text); msgs.append(d);
   } else if(e.k === "asst"){
     const d = document.createElement("div"); d.className = "m-a"; d.innerHTML = md(e.text); msgs.append(d);
     // files Claude handed you (the server checked they exist and are downloadable) → a Download card

@@ -98,6 +98,7 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
   color:var(--muted);font:500 11.5px system-ui;cursor:pointer;white-space:nowrap;text-decoration:underline dotted;text-underline-offset:3px}
 .m-u.pend .sendnow:hover{color:var(--accent);background:none}
 .m-a{word-break:break-word}
+.m-a.think{color:var(--muted);font-style:italic}
 .m-a>:first-child{margin-top:0}.m-a>:last-child{margin-bottom:0}
 .m-a p{margin:.3em 0}.m-a ul,.m-a ol{margin:.3em 0;padding-left:1.3em}.m-a li{margin:.12em 0}
 .m-a h3,.m-a h4,.m-a h5{margin:.6em 0 .2em;font-size:13.5px}

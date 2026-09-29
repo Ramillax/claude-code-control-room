@@ -144,6 +144,11 @@ def _events(lines):
             continue
         for part in c or []:
             pt = part.get("type")
+            if pt == "thinking":                    # the narration the terminal shows as ● text (the signature alone when empty)
+                txt = (part.get("thinking") or "").strip()
+                if txt:
+                    out.append({"k": "think", "text": txt[:4000], "ts": ts})
+                continue
             if pt == "text":
                 txt = _strip(part.get("text", ""))
                 if txt:
