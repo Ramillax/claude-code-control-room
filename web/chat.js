@@ -216,7 +216,9 @@ function addEvent(msgs, e){
       a.append(card);
     }
     const fp = (e.input || {}).file_path || "";
-    if(e.name === "Read" && /\.(png|jpe?g|gif|webp|pdf)$/i.test(fp)){
+    // already visible in one of your messages → don't repeat the thumbnail when Claude reads it
+    const shown = [...msgs.querySelectorAll(".m-u .att-img, .m-u .att-pdf")].some(a => (a.getAttribute("href")||"") === viewURL(fp));
+    if(e.name === "Read" && /\.(png|jpe?g|gif|webp|pdf)$/i.test(fp) && !shown){
       let a = g.nextElementSibling;
       if(!a || !a.classList.contains("toolatt")){ a = document.createElement("div"); a.className = "atts toolatt"; g.after(a); }
       a.insertAdjacentHTML("beforeend", attHTML(fp));
