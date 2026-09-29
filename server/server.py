@@ -936,7 +936,8 @@ class Handler(SimpleHTTPRequestHandler):
         if files:
             paths = [p for p, _, _ in self.save_files(files)]
             text = (text + "\n\n" if text else "") + "\n".join(paths)
-        ok = chat.send(g("s"), SESSIONS, text=text or None, key=g("key") or None)
+        ok = chat.send(g("s"), SESSIONS, text=text or None, key=g("key") or None,
+                        choose=g("pick") or None, clear=g("clear") == "1")
         self._page(200 if ok else 400, "<p class='ok'>✔</p>" if ok else "<p class='warn'>could not type into the session</p>", ok=ok)
 
     # Like /dl but INLINE and only images/PDF: chat thumbnails and the in-page viewer use it.

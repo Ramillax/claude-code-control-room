@@ -235,11 +235,12 @@ function addEvent(msgs, e){
 function renderPerm(idx, scr){
   const c = chatEls(idx); if(!c) return;
   c.msgs.querySelectorAll(".stp.waiting").forEach(x=> x.classList.remove("waiting"));
-  if(!scr || !scr.opts || !scr.opts.length){ c.perm.hidden = true; c.perm.innerHTML = ""; c.perm.dataset.key = ""; return; }
+  if(!scr || (!scr.setup && !(scr.opts || []).length)){ c.perm.hidden = true; c.perm.innerHTML = ""; c.perm.dataset.key = ""; return; }
   const steps = [...c.msgs.querySelectorAll(".stp")];
   const pend = steps.length && !steps[steps.length-1].querySelector(".r").innerHTML ? steps[steps.length-1] : null;
   if(pend){ pend.classList.add("waiting"); const g = pend.closest(".grp"); if(g) g.open = true; }
   const key = JSON.stringify(scr) + (pend ? pend.dataset.id : ""); if(c.perm.dataset.key === key) return;
+  if(scr.setup) return renderSetup(c, scr, key);
   c.perm.dataset.key = key; c.perm.hidden = false;
   let what = "";
   if(pend){
@@ -252,6 +253,38 @@ function renderPerm(idx, scr){
     scr.opts.map(o=>`<button type="button" class="${o.n==="1"?"yes":isNo(o.label)?"no":""}" data-key="${esc(o.n)}" title="${esc(o.label)}">${esc(o.n)}. ${esc(o.label)}</button>`).join("") +
     '<button type="button" data-key="Escape" title="cancel">Esc</button></div>';
 }
+// First-run / sign-in screens (theme, login method, the sign-in link + its code, trust this folder,
+// Press Enter…): Claude waits for an answer before any transcript exists, so they come from the screen.
+function renderSetup(c, scr, key){
+  c.perm.dataset.key = key; c.perm.hidden = false;
+  const opts = scr.opts || [];
+  c.perm.innerHTML = `<div class="q">${esc(scr.question || "Claude is setting up — it's waiting for you")}</div>` +
+    (scr.detail && scr.detail.trim() ? `<div class="what"><pre>${esc(scr.detail)}</pre></div>` : "") +
+    (scr.url ? `<div class="surl"><a href="${esc(scr.url)}" target="_blank" rel="noopener">Open the sign-in page ↗</a><button type="button" data-copyurl="1">Copy link</button></div>` : "") +
+    (scr.code ? '<div class="shint">Sign in there, then paste the code it gives you in the box below and send it.</div>' : "") +
+    '<div class="opts">' + (opts.length
+      ? opts.map((o,i)=>`<button type="button" class="${i===scr.cur?"yes":""}" data-pick="${esc(o.n)}" title="${esc(o.label)}">${esc(o.label)}</button>`).join("")
+      : (scr.code ? "" : '<button type="button" class="yes" data-key="Enter">Enter ⏎</button>')) +
+    '<button type="button" data-key="Escape" title="cancel">Esc</button></div>';
+  c.perm.querySelector("[data-copyurl]")?.addEventListener("click", e=>{ copyText(window, scr.url);
+    e.target.textContent = "Copied"; setTimeout(()=> e.target.textContent = "Copy link", 1200); });
+}
+// Text sitting in Claude's input box, NOT sent: typed in Term, or put back by Esc (the transcript
+// keeps that message, so without this the chat shows it as sent while the terminal is still editing it).
+function renderDraft(c, text){
+  let dr = c.tile.querySelector(".cdraft");
+  c.msgs.querySelectorAll(".m-u.back").forEach(x=> x.classList.remove("back"));
+  if(!text){ if(dr) dr.remove(); return; }
+  const last = [...c.msgs.querySelectorAll(".m-u:not(.pend)")].pop();
+  if(last && last.textContent.trim() === text.trim()) last.classList.add("back");
+  if(!dr){ dr = document.createElement("div"); dr.className = "cdraft"; c.tile.querySelector(".ccwrap").before(dr); }
+  if(dr.dataset.text === text) return;
+  dr.dataset.text = text;
+  dr.innerHTML = '<div class="dt">✎ In the terminal box, <b>not sent</b></div><pre></pre><div class="opts">' +
+    '<button type="button" class="yes" data-dr="send">Send it</button><button type="button" data-dr="edit">Edit here</button>' +
+    '<button type="button" data-dr="clear">Discard</button></div>';
+  dr.querySelector("pre").textContent = text;
+}
 async function pollChat(idx){
   const c = chatEls(idx); if(!c || c.tile.dataset.mode !== "chat") return;
   const sess = c.sel.value;
@@ -263,7 +296,7 @@ async function pollChat(idx){
     if(!r.ok) return;
     const d = await r.json();
     if(chatSt[idx] !== st) return;                     // the tile switched session meanwhile
-    const note = html => { if(c.msgs.dataset.note !== html){ c.msgs.innerHTML = html; c.msgs.dataset.note = html; } st.sid = ""; st.off = 0; renderPerm(idx, null); };
+    const note = (html, scr) => { if(c.msgs.dataset.note !== html){ c.msgs.innerHTML = html; c.msgs.dataset.note = html; } st.sid = ""; st.off = 0; renderPerm(idx, scr || null); renderDraft(c, ""); };
     c.tile.classList.toggle("away", !!(d.away || d.off === true));
     if(d.away){
       const where = d.shell ? `it is at the <b>shell</b> (<code>${esc(d.cmd)}</code>)` : `it is running <b><code>${esc(d.cmd)}</code></b>`;
@@ -276,8 +309,9 @@ async function pollChat(idx){
         <button type="button" data-goterm="1">Go to Term</button></div></div>`);
     }
     if(d.off === true) return note('<div class="awaycard"><div class="aw-ic">⏻</div><div class="aw-t">Session not started</div><div class="aw-d">It starts the first time its terminal opens.</div><div class="aw-b"><button type="button" class="yes" data-goterm="1">Open Term</button></div></div>');
-    if(d.fresh && !st.sid) return note('<div class="shellnote">New conversation: no messages yet.<br>Type below to start.</div>');
-    if(d.nohooks && !st.sid) return note('<div class="shellnote">No transcript for this session yet.<br>Chat needs the hooks (<code>install.sh --hooks</code>) — <b>Term</b> always works.</div>');
+    if(!d.sid && d.screen && d.screen.setup) return note('<div class="shellnote">Claude is getting ready (first run, sign-in or trusting this folder).<br>Answer it below ↓</div>', d.screen);
+    if(d.fresh && !st.sid) return note('<div class="shellnote">New conversation: no messages yet.<br>Type below to start.</div>', d.screen);
+    if(d.nohooks && !st.sid) return note('<div class="shellnote">No transcript for this session yet.<br>Chat needs the hooks (<code>install.sh --hooks</code>) — <b>Term</b> always works.</div>', d.screen);
     c.msgs.dataset.note = "";
     const stick = nearBottom(c.msgs);
     if(d.reset) c.msgs.innerHTML = d.partial ? '<div class="note">… earlier messages are in the terminal</div>' : "";
@@ -285,6 +319,7 @@ async function pollChat(idx){
     (d.events || []).forEach(e=> addEvent(c.msgs, e));
     st.sid = d.sid; st.off = d.off;
     renderPerm(idx, d.screen);
+    renderDraft(c, d.draft || "");
     const w = c.tile.querySelector(".working");
     w.classList.toggle("spin", !!d.spin);
     w.querySelector(".verb").textContent = d.spin ? d.spin.verb : "Working…";
@@ -368,6 +403,14 @@ function wireChat(tile, idx){
   btn.addEventListener("click", send);
   tile.querySelector(".cperm").addEventListener("click", e=>{
     const b = e.target.closest("button[data-key]"); if(b) chatSend(idx, {key:b.dataset.key});
+    const p = e.target.closest("button[data-pick]"); if(p){ p.disabled = true; chatSend(idx, {pick:p.dataset.pick}); }
+  });
+  tile.querySelector(".chat").addEventListener("click", e=>{   // the "not sent" box: send it / edit it here / discard it
+    const b = e.target.closest("[data-dr]"); if(!b) return;
+    const dr = b.closest(".cdraft"), text = dr ? dr.dataset.text : "";
+    if(b.dataset.dr === "send") chatSend(idx, {key:"Enter"});
+    else { if(b.dataset.dr === "edit"){ ta.value = text; grow(); ta.focus(); } chatSend(idx, {clear:"1"}); }
+    if(dr) dr.remove();
   });
   // "send now": Esc interrupts; the Enter after it sends the message if Claude put it back in the
   // prompt (if Claude already sent it on its own, the Enter lands on an empty prompt and does nothing)

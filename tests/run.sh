@@ -284,4 +284,28 @@ else
   echo "  (node not installed: skipped)"
 fi
 
+echo "chat: first-run screens and the unsent input box (parsed from the screen)"
+python3 - "$HERE/server" > "$T/setup.out" <<'EOF'
+import sys; sys.path.insert(0, sys.argv[1]); import chat
+trust = " Quick safety check: Is this a project you created or one you trust?\n\n Security guide\n\n ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n"
+s = chat.setup_screen("x", trust); print("trust", [o["label"] for o in s["opts"]], s["cur"])
+theme = " Choose the text style\n\n   1. Auto (match terminal)\n ❯ 2. Dark mode ✔\n   3. Light mode\n\n ╌╌╌╌\n  1  function greet() {\n"
+s = chat.setup_screen("x", theme); print("theme", len(s["opts"]), s["cur"], s["opts"][1]["label"])
+url = " ███▓\n Browser didn't open? Use the url below to sign in\nhttps://example.com/auth?a=1&b\n=2&c=3\n Paste code here if prompted >\n"
+s = chat.setup_screen("x", url); print("url", s["url"], s["code"])
+print("moving", chat.setup_screen("x", " some text\n still drawing\n"))
+rule = "─" * 40
+print("draft", repr(chat.draft("x", f"❯ sent before\n{rule}\n❯ line one\n  line two\n{rule}\n  ⏸ manual mode on\n")))
+print("empty", repr(chat.draft("x", f"{rule}\n❯ \n{rule}\n")))
+print("hint", repr(chat.draft("x", f"{rule}\n\x1b[39m❯ \x1b[2mTry something\x1b[22m\n{rule}\n")))
+print("nobox", chat.draft("x", " ❯ 1. Yes\n   2. No\n"))
+EOF
+check "trust this folder: options without numbers, cursor on the first" 'grep -qF "trust ['"'"'No, exit'"'"', '"'"'Yes, I trust this folder'"'"'] 0" "$T/setup.out"'
+check "theme list: cursor on option 2, the preview below is not an option" 'grep -qF "theme 3 1 Dark mode" "$T/setup.out"'
+check "the wrapped sign-in link is joined back"      'grep -qF "url https://example.com/auth?a=1&b=2&c=3 True" "$T/setup.out"'
+check "a screen with nothing to answer is not a card" 'grep -qF "moving None" "$T/setup.out"'
+check "text left in the input box is read, multi-line" "grep -qF \"draft 'line one\\\\nline two'\" \"\$T/setup.out\""
+check "empty box and dimmed hint are not a draft"    "grep -qF \"empty ''\" \"\$T/setup.out\" && grep -qF \"hint ''\" \"\$T/setup.out\""
+check "no input box on screen → None"                'grep -qF "nobox None" "$T/setup.out"'
+
 [ $FAIL = 0 ] && echo "all tests passed" || { echo "SOME TESTS FAILED"; exit 1; }

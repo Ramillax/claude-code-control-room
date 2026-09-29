@@ -159,6 +159,18 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
 .cperm button.yes{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .cperm button.no{border-color:rgba(229,120,109,.6);color:#f0a59c}
 .cperm button:hover{border-color:var(--accent)}
+.cperm .surl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px}
+.cperm .surl a{color:var(--accent);font-weight:600;text-decoration:none;border:1px solid var(--accent);border-radius:999px;padding:5px 12px}
+.cperm .shint{color:var(--muted);font-size:12.5px;margin:0 0 8px}
+.cdraft{margin:0 12px 8px;border:1px dashed var(--accent);border-radius:11px;padding:8px 11px;background:rgba(0,0,0,.18)}
+.cdraft .dt{font-size:12.5px;color:var(--muted);margin-bottom:5px}
+.cdraft .dt b{color:var(--fg)}
+.cdraft pre{margin:0 0 7px;max-height:90px;overflow:auto;white-space:pre-wrap;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+.cdraft .opts{display:flex;flex-wrap:wrap;gap:6px}
+.cdraft button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:999px;padding:4px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.cdraft button.yes{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.m-u.back{opacity:.6;border-style:dashed}
+.m-u.back::after{content:"↩ canceled with Esc — back in the terminal box";display:block;font-size:11px;color:var(--muted);margin-top:4px}
 /* composer + attachments */
 .ccwrap{margin:0 12px 12px}
 .cprev{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 6px}

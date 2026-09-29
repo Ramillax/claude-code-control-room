@@ -190,12 +190,14 @@ def screen(sess, cap=None):
         else:
             break
     qi = first - 1
-    q = lines[qi].strip() if qi >= 0 and lines[qi].strip().endswith("?") else ""
+    q = lines[qi].strip() if qi >= 0 and lines[qi].strip().endswith(("?", ":")) else ""
     # detail = what sits between the last ─── rule and the question, minus the UI's "Tip:" paragraph
     top = qi if q else first
     rule = next((i for i in range(top - 1, -1, -1) if re.match(r"^\s*[─━-]{8,}\s*$", lines[i])), max(0, top - 14))
     detail, tip = [], False
     for l in lines[rule + 1:top]:
+        if ART.search(l):                                 # the welcome banner of the first-run screens
+            continue
         if l.strip().startswith("Tip:"):
             tip = True
             continue
@@ -218,6 +220,124 @@ def spinner(sess, cap=None):
     return None
 
 
+# ── Claude's own input box, and the screens that come before the first prompt ─────────────────
+RULE = re.compile(r"^─{20,}\s*$")
+SGR = re.compile(r"\x1b\[[0-9;:]*m")
+ART = re.compile(r"[░▒▓█▄▀▐▌▛▜▝▘▗▖]")
+CURSOR = re.compile(r"^(\s*)❯[\s ]+(?:(\d)\.\s+)?(.+?)\s*$")
+
+
+def draft(sess, cap_e=None):
+    """What sits in Claude's input box and was NOT sent: typed in Term, or put back there by Esc
+    (Esc on a message Claude hadn't answered yet returns it to the box, yet the transcript keeps it,
+    so the chat would show it as sent). None = no input box on screen (a dialog, setup, another UI)."""
+    cap_e = cap_e if cap_e is not None else _run(TMUX + ["capture-pane", "-p", "-e", "-t", f"={sess}:"])
+    if cap_e is not None and not isinstance(cap_e, str):
+        cap_e = cap_e.stdout if cap_e.returncode == 0 else None
+    if not cap_e:
+        return None
+    raw = cap_e.splitlines()
+    plain = [SGR.sub("", l) for l in raw]
+    box = [i for i in range(1, len(plain)) if RULE.match(plain[i - 1]) and re.match(r"^❯[\s ]", plain[i])]
+    if not box:
+        return None
+    i = box[-1]
+    # a dimmed placeholder / suggestion is not text you typed
+    m = re.match(r"^(?:\x1b\[[0-9;:]*m)*❯[\s ]*((?:\x1b\[[0-9;:]*m)*)", raw[i])
+    if m and re.search(r"\[(?:2|90|38;5;(?:2[3-4]\d|8))m", m.group(1)):
+        return ""
+    out = [plain[i][2:].rstrip()]
+    for l in plain[i + 1:]:
+        if RULE.match(l):
+            break
+        out.append(l[2:].rstrip())
+    return "\n".join(out).strip("\n").strip()
+
+
+def _menu(lines):
+    """A selection list with Claude's ❯ cursor, numbered or not ('❯ No, exit / Yes, I trust this
+    folder'). → (options, index of the cursor) or None."""
+    ci = next((i for i in range(len(lines) - 1, -1, -1) if CURSOR.match(lines[i])), None)
+    if ci is None:
+        return None
+    cm = CURSOR.match(lines[ci])
+    numbered = bool(cm.group(2))
+    col = len(cm.group(1)) + 2
+    item = (lambda l: OPT.match(l)) if numbered else \
+           (lambda l: CURSOR.match(l) or (len(l) - len(l.lstrip()) == col and not re.match(r"^\s*(Esc|Enter|Tab|Press)\b", l)))
+    a = ci
+    while a > 0 and item(lines[a - 1]):
+        a -= 1
+    b = ci
+    while b + 1 < len(lines) and item(lines[b + 1]):
+        b += 1
+    opts = []
+    for l in lines[a:b + 1]:
+        m = CURSOR.match(l) or OPT.match(l)
+        label = (m.group(3) if m and m.re is CURSOR else m.group(2) if m else l.strip()).replace("✔", "").strip()
+        opts.append({"n": str(len(opts) + 1), "label": label[:120]})
+    return (opts, ci - a, a) if len(opts) >= 2 else None
+
+
+def setup_screen(sess, cap=None):
+    """Claude is running but not at its prompt and not in a permission box: the first-run screens
+    (theme, login method, the sign-in link and its code, trust this folder, Press Enter…). Shown as
+    they are, so the chat never sits on 'starting…' while Claude waits for an answer."""
+    cap = cap if cap is not None else _capture(sess)
+    if not cap:
+        return None
+    lines = [l.replace("│", " ").rstrip() for l in cap.splitlines()]
+    lines = [l for l in lines if l.strip() and not ART.search(l) and not re.match(r"^[\s.╌─]+$", l)]
+    if not lines:
+        return None
+    # the sign-in URL is hard-wrapped by the UI: join its pieces back
+    url, j = "", next((k for k, l in enumerate(lines) if l.startswith("https://")), None)
+    if j is not None:
+        k = j
+        while k < len(lines) and re.match(r"^\S+$", lines[k]):
+            url += lines[k]
+            k += 1
+        lines = lines[:j] + ["(sign-in link below)"] + lines[k:]
+    menu = _menu(lines)
+    opts, cur, top = menu if menu else ([], 0, len(lines))
+    if not menu and not url and not re.search(r"Press Enter|Paste code|Enter to|to continue", cap):
+        return None       # a screen in transition: nothing to answer yet
+    above = [l.strip() for l in lines[max(0, top - 8):top]]
+    q = above.pop() if menu and above and above[-1].endswith(("?", ":")) else ""
+    detail = "\n".join(above)[-1200:]
+    return {"setup": True, "question": q[:200], "opts": opts[:9], "cur": cur, "detail": detail[:1500],
+            "url": url[:3000], "code": bool(re.search(r"Paste code", cap))}
+
+
+def pick(sess, allowed, n):
+    """Choose option n of the list on screen: arrows from where the cursor is + Enter (numbers
+    aren't always there, and not every list takes them)."""
+    if sess not in allowed or not str(n).isdigit():
+        return False
+    cap = _capture(sess)
+    lines = [l.replace("│", " ").rstrip() for l in (cap or "").splitlines() if l.strip()]
+    menu = _menu([l for l in lines if not ART.search(l)])
+    if not menu or not 1 <= int(n) <= len(menu[0]):
+        return False
+    d = int(n) - 1 - menu[1]
+    keys = ["Down" if d > 0 else "Up"] * abs(d) + ["Enter"]
+    r = _run(TMUX + ["send-keys", "-t", f"={sess}:"] + keys)
+    return bool(r and r.returncode == 0)
+
+
+def clear_draft(sess):
+    """Empty the input box (Esc Esc = Claude Code's 'clear'). Only when there IS text and Claude isn't
+    working: on an empty box the double Esc opens the rewind menu, and while working it interrupts."""
+    if not draft(sess) or spinner(sess):
+        return False
+    tgt = f"={sess}:"
+    _run(TMUX + ["send-keys", "-t", tgt, "Escape"])
+    time.sleep(0.3)
+    _run(TMUX + ["send-keys", "-t", tgt, "Escape"])
+    time.sleep(0.3)
+    return draft(sess) == ""
+
+
 def get(sess, sid, off, allowed):
     if sess not in allowed:
         return {"error": "session not allowed"}
@@ -230,7 +350,10 @@ def get(sess, sid, off, allowed):
         return {"s": sess, "away": True, "shell": bool(re.match(r"^-?(bash|zsh|sh|fish|dash)$", cmd)),
                 "cmd": cmd, "sid": "", "off": 0, "events": [], "screen": None}
     cap = _capture(sess, 60)
-    res = {"s": sess, "screen": screen(sess, cap), "spin": spinner(sess, cap)}
+    scr, spin, dr = screen(sess, cap), spinner(sess, cap), draft(sess)
+    if scr is None and dr is None and not spin:
+        scr = setup_screen(sess)
+    res = {"s": sess, "screen": scr, "spin": spin, "draft": dr or ""}
     path, fresh = transcript_for(sess)
     if not path:
         return {**res, "sid": "", "off": 0, "events": [], "reset": True, "fresh": fresh, "nohooks": not fresh}
@@ -257,10 +380,14 @@ def get(sess, sid, off, allowed):
             "reset": reset, "partial": reset and start > 0}
 
 
-def send(sess, allowed, text=None, key=None):
+def send(sess, allowed, text=None, key=None, choose=None, clear=False):
     if sess not in allowed:
         return False
     tgt = f"={sess}:"
+    if choose:
+        return pick(sess, allowed, choose)
+    if clear:
+        return clear_draft(sess)
     if key:
         if key not in KEYS:
             return False
@@ -269,6 +396,8 @@ def send(sess, allowed, text=None, key=None):
     text = (text or "").replace("\r\n", "\n").strip()
     if not text:
         return False
+    if draft(sess):          # text left in the box (Esc put a message back): replace it, don't glue onto it
+        clear_draft(sess)
     # bracketed paste: line breaks don't submit the message halfway through
     buf = "cr-chat-" + sess
     r = _run(TMUX + ["load-buffer", "-b", buf, "-"], inp=text)
