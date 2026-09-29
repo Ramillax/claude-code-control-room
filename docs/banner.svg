@@ -43,7 +43,7 @@
       <animate attributeName="stroke" dur="8s" repeatCount="indefinite" keyTimes="0;.3;.32;.72;.74;1" values="#5a2f2a;#5a2f2a;#e5786d;#e5786d;#5a2f2a;#5a2f2a"/></rect>
     <circle cx="540" cy="252" r="7" fill="#e5786d"/><text x="556" y="259" fill="#f3c2bb">needs you</text>
     <rect x="706" y="232" width="110" height="40" rx="20" fill="#1b2230" stroke="#33415c"/><circle cx="730" cy="252" r="7" fill="#8ab4ff"/><text x="746" y="259" fill="#c9dafc">idle</text>
-    <rect x="830" y="232" width="172" height="40" rx="20" fill="#2d2119" stroke="#5b3f2a"/><path d="M850 250v-4a6 6 0 0 1 12 0v4" fill="none" stroke="#f2c98a" stroke-width="2.6"/><rect x="846" y="249" width="20" height="15" rx="3.5" fill="#f2c98a"/><text x="876" y="259" class="m" fill="#f2c98a" font-weight="500">api:auth</text>
+    <rect x="830" y="232" width="198" height="40" rx="20" fill="#2d2119" stroke="#5b3f2a"/><path d="M850 250v-4a6 6 0 0 1 12 0v4" fill="none" stroke="#f2c98a" stroke-width="2.6"/><rect x="846" y="249" width="20" height="15" rx="3.5" fill="#f2c98a"/><text x="876" y="259" fill="#f2c98a">shared locks</text>
   </g>
   <text x="354" y="316" class="m" font-size="18" fill="#6f6d66">see · coordinate · remember</text>
 </svg>

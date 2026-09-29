@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 128" width="880" height="128" role="img" aria-label="Try it in your browser: GitHub Codespaces, free, ready in about a minute">
+  <style>.t{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}</style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e58c63"/><stop offset="1" stop-color="#c65d3a"/></linearGradient>
+    <linearGradient id="sh" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".28"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <clipPath id="pill"><rect x="4" y="4" width="872" height="120" rx="60"/></clipPath>
+  </defs>
+  <rect x="4" y="4" width="872" height="120" rx="60" fill="url(#bg)"/>
+  <g clip-path="url(#pill)">
+    <rect x="-260" y="0" width="200" height="128" fill="url(#sh)" transform="skewX(-20)">
+      <animate attributeName="x" values="-260;-260;1100" keyTimes="0;.55;1" dur="4.5s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  <rect x="5" y="5" width="870" height="118" rx="59" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="2"/>
+  <circle cx="68" cy="64" r="36" fill="#fff"/>
+  <path d="M58 46 L84 64 L58 82 Z" fill="#c65d3a"/>
+  <text x="126" y="60" class="t" font-size="38" font-weight="800" fill="#fff" letter-spacing="-.5">Try it in your browser</text>
+  <text x="127" y="95" class="t" font-size="21" fill="#ffe9df">GitHub Codespaces · free quota · ready in about a minute</text>
+  <path d="M808 50 L826 64 L808 78" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

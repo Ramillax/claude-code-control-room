@@ -1,10 +1,14 @@
 <p align="center"><img src="docs/banner.svg" alt="Claude Code Control Room: parallel Claude Code sessions, live state and locks, in one screen" width="100%"></p>
 
 [![CI](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml)
-[![Open in GitHub Codespaces](https://img.shields.io/badge/Try_it-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
+
+<p align="center">
+  <a href="https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1"><img src="docs/cta-try.svg" width="440" alt="Try it in your browser: GitHub Codespaces, free quota, ready in about a minute"></a>&nbsp;&nbsp;<a href="#quick-start"><img src="docs/cta-install.svg" width="320" alt="Install on your server: Quick start"></a>
+</p>
+<p align="center"><sub>The Codespace's port is private: only your GitHub account can open it. Log in to Claude Code in the first tile and you're running.</sub></p>
 
 ![Six sessions in Chat view: one waits for permission and shows the exact command it wants to run, one got a screenshot and a PDF, one is at the shell; the board shows who holds which lock, and any tile flips back to its live terminal](docs/demo.png)
 

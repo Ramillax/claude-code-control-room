@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 128" width="640" height="128" role="img" aria-label="Install on your own server: Quick start">
+  <style>.t{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}.m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style>
+  <rect x="4" y="4" width="632" height="120" rx="60" fill="#1f1e1b"/>
+  <rect x="5" y="5" width="630" height="118" rx="59" fill="none" stroke="#5b3f2a" stroke-width="2.5"/>
+  <circle cx="68" cy="64" r="36" fill="#2d2119" stroke="#5b3f2a" stroke-width="2"/>
+  <text x="68" y="74" class="m" font-size="28" font-weight="700" fill="#e58c63" text-anchor="middle">&gt;_</text>
+  <text x="126" y="60" class="t" font-size="34" font-weight="800" fill="#ece9e1" letter-spacing="-.5">Install on your server</text>
+  <text x="127" y="95" class="t" font-size="21" fill="#a19f97">Linux · tmux + ttyd · Quick start</text>
+  <path d="M572 50 L590 64 L572 78" fill="none" stroke="#e58c63" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
