@@ -424,7 +424,7 @@ function paintUsage(){
   const meter = (lbl, sh, v)=> v && v.pct != null ? `<span class="u" title="${lbl}: ${fmtReset(v.resets_at)}"><span class="ll">${lbl}</span><span class="ls">${sh}</span> ` +
     `<span class="bar"><i class="${v.pct>=80?"hi":""}" style="width:${Math.min(100,v.pct)}%"></i></span><b>${v.pct}%</b><span class="rs">· ${fmtReset(v.resets_at)}</span></span>` : "";
   box.innerHTML = meter("Session", "5h", u.five_hour) + meter("Week", "wk", u.seven_day);
-  tilesArr().forEach((t,i)=>{ const c = t.querySelector(".ctx"), v = (u.ctx || {})[sessOf(i)]; if(c) c.textContent = v != null ? `ctx ${v}%` : ""; });
+  tilesArr().forEach((t,i)=>{ const c = t.querySelector(".ctx"), v = (u.ctx || {})[sessOf(i)]; if(c) c.innerHTML = v != null ? `<span class="cl">ctx </span>${v}%` : ""; });
 }
 async function pollUsage(){
   try{ const r = await fetch("api/usage?t="+Date.now(), {cache:"no-store"}); if(r.ok){ lastUsage = await r.json(); paintUsage(); } }catch(e){}
@@ -443,6 +443,7 @@ function interruptTile(idx){
 document.addEventListener("keydown", e=>{
   if(e.key !== "Escape" || e.defaultPrevented) return;
   const lb = document.getElementById("lightbox"); if(lb && lb.classList.contains("on")) return;
+  const cm = document.getElementById("clipmenu"); if(cm && !cm.hidden){ cm.hidden = true; e.preventDefault(); return; }
   const t = tilesArr()[activeIdx]; if(!t || t.dataset.mode !== "chat") return;
   e.preventDefault(); interruptTile(activeIdx);
 });
@@ -470,3 +471,40 @@ document.addEventListener("click", e=>{
   const t = c.closest(".tile"); t.dataset.retry = Date.now();
   t.querySelector("iframe").src = TTY(sessOf(tilesArr().indexOf(t)));
 });
+
+// ── Clip history (⌄): clip.txt + clip-1..3.txt, rotated by cr-clip ─────────────────────────────
+// The clip is one for every session; when another session overwrote yours, the previous ones are here.
+(function clipHistory(){
+  const btn = document.getElementById("cliphist"), menu = document.getElementById("clipmenu");
+  if(!btn || !menu) return;
+  const NAMES = ["clip.txt", "clip-1.txt", "clip-2.txt", "clip-3.txt"];
+  let items = [];
+  const when = d => { if(!d) return ""; const t = new Date(d);
+    return (t.toDateString() === new Date().toDateString() ? "" : t.toLocaleDateString([], {day:"2-digit", month:"2-digit"}) + " ") +
+           t.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); };
+  async function load(){
+    items = (await Promise.all(NAMES.map(async (n, i)=>{
+      try{ const r = await fetch(n + "?t=" + Date.now(), {cache:"no-store"}); if(!r.ok) return null;
+        const text = (await r.text()).replace(/\n+$/, ""); if(!text) return null;
+        return {i, text, at: r.headers.get("Last-Modified")}; }catch(e){ return null; }
+    }))).filter(Boolean);
+  }
+  async function open(){
+    await load();
+    menu.innerHTML = '<div class="ct">last clips — tap one to copy it</div>' + (items.length ? items.map((x,k)=>
+      `<button type="button" data-k="${k}"><div class="cm-h"><span>${x.i === 0 ? "<b>current</b>" : "previous " + x.i}</span><span>${when(x.at)}</span></div>` +
+      `<div class="cm-t">${esc(x.text.slice(0, 400))}</div></button>`).join("") : '<div class="empty">no clips yet</div>');
+    const r = btn.getBoundingClientRect();
+    menu.style.top = (r.bottom + 6) + "px";
+    menu.style.left = Math.max(8, Math.min(r.right - 300, window.innerWidth - 310)) + "px";
+    menu.hidden = false;
+  }
+  btn.addEventListener("click", e=>{ e.stopPropagation(); menu.hidden ? open() : (menu.hidden = true); });
+  menu.addEventListener("click", e=>{
+    const b = e.target.closest("button[data-k]"); if(!b) return;
+    const x = items[+b.dataset.k]; if(!x) return;
+    copyText(window, x.text); if(x.i === 0){ clipMarkSeen(x.text); clipDot(false); }
+    menu.hidden = true; clipFlash("✓ copied");
+  });
+  document.addEventListener("click", e=>{ if(!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true; });
+})();

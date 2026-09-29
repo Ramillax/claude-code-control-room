@@ -14,7 +14,27 @@ header .brand .dot{width:22px;height:22px;border-radius:7px;background:var(--acc
 .seg button{background:transparent;border:0;border-radius:7px;padding:5px 11px}
 .seg button.on{color:#fff;box-shadow:0 1px 6px rgba(217,119,87,.35)}
 header #tools{background:transparent;border:0;padding:0;gap:6px}
-header #tools button{background:var(--panel2);border:1px solid var(--border);border-radius:999px;color:var(--fg);padding:5px 13px}
+header #tools button{background:var(--panel2);border:1px solid var(--border);border-radius:999px;color:var(--fg);padding:5px 13px 5px 11px;
+  font-weight:500;white-space:nowrap}
+header #tools button .i{color:var(--accent);margin-right:5px}
+/* 📋 clip + its history (⌄), one pill split in two */
+header #clipgrp{background:transparent;border:0;padding:0;gap:0}
+header #clipgrp #clipbtn{background:var(--panel2);border:1px solid var(--border);border-right:0;border-radius:999px 0 0 999px;color:var(--fg);
+  padding:5px 10px 5px 11px;font-weight:500;white-space:nowrap}
+header #clipgrp #cliphist{background:var(--panel2);border:1px solid var(--border);border-radius:0 999px 999px 0;color:var(--muted);padding:5px 10px 5px 7px}
+header #clipgrp button:hover{border-color:var(--accent);color:#fff}
+header #clipgrp .i{color:var(--accent);margin-right:5px}
+#clipmenu{position:fixed;z-index:80;min-width:280px;max-width:min(460px,94vw);background:var(--panel2);border:1px solid var(--border);
+  border-radius:12px;padding:6px;box-shadow:0 14px 40px rgba(0,0,0,.55);font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#clipmenu .ct{color:var(--muted);font-size:11px;padding:4px 8px 6px}
+#clipmenu button{display:block;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;
+  color:var(--fg);padding:8px 10px;cursor:pointer;font:inherit}
+#clipmenu button:hover{background:rgba(255,255,255,.05);border-color:var(--border)}
+#clipmenu .cm-h{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px}
+#clipmenu .cm-h b{color:var(--accent);font-weight:600}
+#clipmenu .cm-t{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#clipmenu .empty{color:var(--muted);padding:8px 10px}
 header #tools button:hover{border-color:var(--accent);color:#fff;background:#34312d}
 main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,rgba(217,119,87,.10),transparent 60%),
   radial-gradient(900px 500px at 100% 110%,rgba(217,119,87,.07),transparent 60%)}
@@ -244,17 +264,28 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
   #usage .ls{display:inline}
   #usage .u{gap:3px}
   .notif button{padding:5px 8px;font-size:12px}
-  .tbar .ctx,.tbar .stlabel{display:none}
-  .tbar [data-act="reload"],.tbar [data-act="clear"]{display:none}
-  .tbar select{flex:1 1 84px!important;min-width:84px!important}
+  .tbar .stlabel{display:none}
+  .tbar .ctx .cl{display:none}                    /* phone: just the % (the word "ctx" is in the title) */
+  .tbar{gap:3px!important;padding-left:8px!important;padding-right:6px!important}
+  .tbar button{padding:6px 2px}                   /* the four tile buttons fit next to Chat/Term */
+  .tbar button .i{width:17px;height:17px}
+  .tbar .mseg button{padding:5px 7px!important;font-size:12.5px!important}
+  .tbar .mode{padding:1px 6px}
+  .tbar select{text-overflow:ellipsis}
+  .tbar select{flex:1 1 90px!important;min-width:90px!important;padding:8px 0 8px 2px!important}
   .tbar .mseg button{padding:6px 10px;font-size:13px}
   .ccomp textarea{font-size:16px}                  /* 16px avoids iOS zoom-on-focus */
   .m-u.pend .sendnow{position:static;transform:none;display:block;margin:0 0 4px auto}
   /* in Chat: ONE row with the essentials (tile, esc, ^C, 🎤) — the message box is the keyboard; the tile
      takes the height that's left, so the bar never covers the box */
   body.chatmode #keybar > :not(#winbtn):not([data-key="esc"]):not([data-key="ctrlc"]):not([data-act="mic"]):not([data-key="up"]):not([data-key="down"]):not([data-key="left"]):not([data-key="right"]):not([data-key="enter"]){display:none}
-  /* 2 rows: tile · esc · ^C · 🎤  /  ← ↑ ↓ → ⏎  (visual order via `order`; the HTML stays the same) */
-  body.chatmode #keybar #winbtn{order:0}
+  /* ONE row: tile · esc · ^C · 🎤 · ← ↑ ↓ → ⏎ (visual order via `order`; the HTML stays the same).
+     The keys share the width, so the row fits a 360 px phone without wrapping. */
+  body.chatmode #keybar{flex-wrap:nowrap;gap:4px;padding-left:6px;padding-right:6px;justify-content:center}
+  body.chatmode #keybar > *{flex:1 1 0;min-width:0;padding:0 2px;font-size:15px;max-width:54px}
+  body.chatmode #keybar #winbtn{flex:2.4 1 0;max-width:120px;order:0;padding:0 5px;gap:3px;overflow:hidden;justify-content:center;font-size:0}   /* font-size:0 hides the ⌨ */
+  body.chatmode #keybar #winbtn b{font-size:13px;overflow:hidden;text-overflow:ellipsis}
+  body.chatmode #keybar #winbtn .caret{font-size:10px}
   body.chatmode #keybar [data-key="esc"]{order:1}
   body.chatmode #keybar [data-key="ctrlc"]{order:2}
   body.chatmode #keybar [data-act="mic"]{order:3}
@@ -262,7 +293,19 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
   body.chatmode #keybar [data-key="up"]{order:5}
   body.chatmode #keybar [data-key="down"]{order:6}
   body.chatmode #keybar [data-key="right"]{order:7}
-  body.chatmode #keybar [data-key="enter"]{order:8;min-width:64px}
-  body.chatmode #keybar::after{content:"";order:3;flex-basis:100%;height:0}
-  body.chatmode main{grid-auto-rows:calc(100dvh - 176px)!important}
+  body.chatmode #keybar [data-key="enter"]{order:8}
+  body.chatmode main{grid-auto-rows:calc(100dvh - 124px)!important}
+  /* top bar on the phone: download and 📋 clip (+ ⌄ history), icon only; upload is in the message box */
+  header #tools{display:flex;gap:4px}
+  header #tools button{padding:6px 8px}
+  header #tools .lbl{display:none}
+  header #tools button .i{margin-right:0}
+  header #tools #boardbtn,header #tools #upbtn,header #tools #micbtn{display:none}
+  header #clipgrp .lbl{display:none}
+  header #clipgrp .i{margin-right:0}
+  header #clipgrp #clipbtn,header #clipgrp #cliphist{padding:6px 8px}
+  .tbar [data-act="up"]{display:none}              /* the message box has its own 📎 */
+}
+@media (max-width:399px){                          /* very narrow phones: reload/clear go (the terminal reconnects by itself) */
+  .tbar [data-act="reload"],.tbar [data-act="clear"]{display:none}
 }

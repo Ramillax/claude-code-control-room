@@ -210,6 +210,13 @@ else
   echo "  (tmux not installed: skipped)"
 fi
 
+echo "cr-clip keeps the previous clips"
+CD="$T/clipstate"; mkdir -p "$CD"
+for x in one two two three; do CR_STATE_DIR="$CD" "$HERE/bin/cr-clip" "$x" >/dev/null; done
+check "current clip is the last one"            '[ "$(cat "$CD/clip.txt")" = three ]'
+check "the previous one moved to clip-1"        '[ "$(cat "$CD/clip-1.txt")" = two ]'
+check "setting the same text doesn't rotate"    '[ "$(cat "$CD/clip-2.txt")" = one ] && [ ! -e "$CD/clip-3.txt" ]'
+
 echo "chat: clip cards only for clips that were really loaded"
 if command -v node >/dev/null; then
   python3 - "$HERE/web/chat.js" > "$T/clip.js" <<'EOF'

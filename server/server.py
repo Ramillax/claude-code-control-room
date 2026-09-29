@@ -9,7 +9,7 @@ terminal iframes (on-screen keys, touch scrolling, clipboard bridge):
   /tty/...        reverse proxy to ttyd (HTTP + WebSocket), which listens on a UNIX socket
                   and therefore has no TCP port of its own
   /api/status     per-session state (from the Claude Code hook) + slog locks + recent feed
-  /clip.txt       text an agent left for you to copy (bin/cr-clip)
+  /clip.txt       text an agent left for you to copy (bin/cr-clip); /clip-1..3.txt = the previous ones
   /files, /dl     browse and download files (starts in the outbox, see bin/cr-expose)
   POST /upload    save files, optionally shrink them for tokens, type the path into a session
   POST /rm        delete a file — only inside the uploads/ and outbox/ folders
@@ -28,6 +28,7 @@ import urllib.error, urllib.request
 from datetime import datetime
 from email import policy
 from email.parser import BytesParser
+from email.utils import formatdate
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -568,13 +569,17 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(data)
 
     def _text_file(self, path):
+        mtime = None
         try:
             with open(path, "rb") as fh:
                 data = fh.read()
+            mtime = os.path.getmtime(path)
         except OSError:
             data = b""
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
+        if mtime:                                        # the clip history (⌄) shows when each one was loaded
+            self.send_header("Last-Modified", formatdate(mtime, usegmt=True))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -592,8 +597,8 @@ class Handler(SimpleHTTPRequestHandler):
         q = parse_qs(parts.query)
         if route == "/api/status":
             self._json(status()); return True
-        if route == "/clip.txt":
-            self._text_file(os.path.join(STATE_DIR, "clip.txt")); return True
+        if route in ("/clip.txt", "/clip-1.txt", "/clip-2.txt", "/clip-3.txt"):
+            self._text_file(os.path.join(STATE_DIR, route[1:])); return True
         if route == "/files":
             self.page_files(q); return True
         if route == "/dl":

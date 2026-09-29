@@ -4,16 +4,27 @@
 # Copying out of a terminal is awkward (the Claude TUI repaints and eats browser selections,
 # and phones have no real drag-select). So instead: the agent writes the text here and the
 # 📋 button copies it. A green dot on the button means "new, not copied yet".
+# The clip is one for every session, so another one can overwrite yours: the previous 3 are kept
+# in clip-1..3.txt and the ⌄ next to 📋 lists them.
 #
 #   cr-clip "some long command"      set the clip
 #   echo "multi\nline" | cr-clip     set it from stdin
-#   cr-clip --show | --clear
+#   cr-clip --show | --clear         (--clear keeps the history)
 set -euo pipefail
 DIR="${CR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/controlroom}"
 F="$DIR/clip.txt"; mkdir -p "$DIR"
+set_clip() {                        # stdin → clip; rotates only when the text changed
+  local T="$F.tmp.$$"; cat > "$T"
+  if [ -s "$F" ] && ! cmp -s "$F" "$T"; then
+    [ -f "$DIR/clip-2.txt" ] && mv -f "$DIR/clip-2.txt" "$DIR/clip-3.txt"
+    [ -f "$DIR/clip-1.txt" ] && mv -f "$DIR/clip-1.txt" "$DIR/clip-2.txt"
+    cp -p "$F" "$DIR/clip-1.txt"
+  fi
+  mv -f "$T" "$F"; echo "📋 clip set ($(wc -c < "$F") bytes)"
+}
 case "${1:-}" in
   --show)  cat "$F" 2>/dev/null || true;;
   --clear) : > "$F"; echo "clip cleared";;
-  "")      cat > "$F.tmp" && mv "$F.tmp" "$F"; echo "📋 clip set ($(wc -c < "$F") bytes)";;
-  *)       printf '%s' "$*" > "$F.tmp" && mv "$F.tmp" "$F"; echo "📋 clip set ($(wc -c < "$F") bytes)";;
+  "")      set_clip;;
+  *)       printf '%s' "$*" | set_clip;;
 esac

@@ -162,11 +162,14 @@
   </div>
   <div class="seg notif" id="notif" hidden></div>
   <div class="seg" id="tools">
-    <button type="button" id="boardbtn" title="slog board: who holds which lock + recent activity">🗂 board</button>
-    <button type="button" id="upbtn" title="upload files to the active session">📎 upload</button>
-    <button type="button" id="dlbtn" title="download files from the server (starts in the outbox)">📥 download</button>
-    <button type="button" id="micbtn" title="dictate the prompt — typed into the session, no Enter">🎤 dictate</button>
-    <button type="button" id="clipbtn" title="copy the text an agent left with cr-clip">📋 clip</button>
+    <button type="button" id="boardbtn" title="slog board: who holds which lock + recent activity"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg><span class="lbl">board</span></button>
+    <button type="button" id="upbtn" title="upload files to the active session"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg><span class="lbl">upload</span></button>
+    <button type="button" id="dlbtn" title="download files from the server (starts in the outbox)"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg><span class="lbl">download</span></button>
+    <button type="button" id="micbtn" title="dictate the prompt — typed into the session, no Enter"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="lbl">dictate</span></button>
+  </div>
+  <div class="seg" id="clipgrp">
+    <button type="button" id="clipbtn" title="copy the text an agent left with cr-clip"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg><span class="lbl">clip</span></button>
+    <button type="button" id="cliphist" title="the last clips (4 are kept: if another session overwrote yours, it's here)">⌄</button>
   </div>
   <div class="spacer"></div>
   <div id="usage" title="your Claude plan usage, as Claude Code reports it to its status line"></div>
@@ -174,6 +177,8 @@
 <main id="grid" data-cols="2"></main>
 <!-- Chat composer posts here (navigational form, never XHR); the in-page image/PDF viewer -->
 <iframe name="chatsink" hidden title="chat send"></iframe>
+<!-- outside the header: its backdrop-filter traps position:fixed children and clipped the menu -->
+<div id="clipmenu" hidden></div>
 <div id="lightbox" role="dialog" aria-modal="true"><div class="lbbar"><span class="lbname"></span>
   <a class="lbopen" target="_blank" rel="noopener">open in a tab</a><button type="button" class="lbx" title="close (Esc)">✕</button></div>
   <div class="lbbody"></div></div>
@@ -588,12 +593,12 @@ document.getElementById("dlbtn").onclick = openDownload;
 // ── 📋 Clip: copy what an agent left with `cr-clip` ───────────────────────────────────────
 // A plain same-origin GET is fine here (only POSTs need the navigational-form trick).
 function clipBtns(){ return [...document.querySelectorAll('#clipbtn, #keybar [data-act="clip"]')]; }
-clipBtns().forEach(b=> b.dataset.lbl = b.textContent);
+clipBtns().forEach(b=> b.dataset.lbl = b.innerHTML);   // header buttons carry an SVG icon
 let clipTimer = null;
 function clipFlash(msg){
   clearTimeout(clipTimer);
   clipBtns().forEach(b=> b.textContent = msg);
-  clipTimer = setTimeout(()=> clipBtns().forEach(b=> b.textContent = b.dataset.lbl), 1800);
+  clipTimer = setTimeout(()=> clipBtns().forEach(b=> b.innerHTML = b.dataset.lbl), 1800);
 }
 async function fetchClip(){
   try{ const r = await fetch("clip.txt?t="+Date.now(), {cache:"no-store"}); if(r.ok) return (await r.text()).replace(/\n+$/, ""); }catch(e){}
@@ -620,8 +625,8 @@ const stfile = document.getElementById("stfile"), stsess = document.getElementBy
 const MIC_MAX = 180;                                     // hard cap in seconds
 let rec = null, recChunks = [], recStream = null, recTimer = null, recT0 = 0, recSess = "", stBusy = false;
 function micBtns(){ return [...document.querySelectorAll('#micbtn, #keybar [data-act="mic"]')]; }
-micBtns().forEach(b=> b.dataset.lbl = b.textContent);
-function micIdle(){ micBtns().forEach(b=>{ b.classList.remove("rec"); b.textContent = b.dataset.lbl; }); }
+micBtns().forEach(b=> b.dataset.lbl = b.innerHTML);
+function micIdle(){ micBtns().forEach(b=>{ b.classList.remove("rec"); b.innerHTML = b.dataset.lbl; }); }
 function micRecUI(s){ const t = "⏹ " + Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); micBtns().forEach(b=>{ b.classList.add("rec"); b.textContent = t; }); }
 // iOS Safari only records audio/mp4; Chrome/Android use webm/opus. Whisper accepts all of them.
 function micMime(){
@@ -725,10 +730,10 @@ function tileEl(idx){
      <span class="mseg"><button type="button" data-m="chat">Chat</button><button type="button" data-m="term">Term</button></span>
      <span class="locks"></span>
      <span class="tspacer"></span>
-     <button data-act="up" title="upload files to this session (or drop them on it)">📎</button>
-     <button data-act="reload" title="reload this tile">⟳</button>
-     <button data-act="clear" title="clear this tile's scrollback (frees tmux memory)">🧹</button>
-     <button data-act="full" title="full screen">⤢</button>`;
+     <button data-act="up" title="upload files to this session (or drop them on it)"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg></button>
+     <button data-act="reload" title="reload this tile"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+     <button data-act="clear" title="clear this tile's scrollback (frees tmux memory)"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21h13M5.5 15.5l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L12 19H8.5l-3-3a2 2 0 0 1 0-2.8z"/></svg></button>
+     <button data-act="full" title="full screen"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>`;
   const ifr = document.createElement("iframe");
   ifr.src = TTY(sess); ifr.setAttribute("allow", "clipboard-read; clipboard-write");
   wireIframe(ifr, idx);
@@ -740,7 +745,7 @@ function tileEl(idx){
   bar.querySelector('[data-act="clear"]').onclick = ()=> sendKeyTo(ifr, {key:"F12", code:"F12", kc:123});
   bar.querySelector('[data-act="full"]').onclick = e=>{
     tile.classList.toggle("full");
-    e.target.textContent = tile.classList.contains("full") ? "✕" : "⤢";
+    e.currentTarget.innerHTML = tile.classList.contains("full") ? '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' : '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
     setActive(idx);
   };
   // Chat view ON TOP of the terminal (see chat.js): the terminal keeps running underneath at its real size

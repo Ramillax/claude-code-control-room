@@ -30,7 +30,7 @@ What you get:
 - **Mode and plan usage at a glance**: each tile shows Claude Code's permission mode (auto / accept edits / plan / manual; **tap it to switch**, like Shift+Tab) and how much context the conversation uses. The top bar shows your plan's **5-hour session and weekly usage** with their reset times, read from a silent status line.
 - **Built for the phone**: the Chat view is plain web text, so you select and scroll with your finger; in Term, an on-screen key bar (Esc, arrows, Tab, Ctrl-C), swipe to scroll history, tap-to-jump between sessions. The header fits one row.
 - **Files both ways**: paste a screenshot with **Ctrl-V**, drop files, or use 📎; images and PDFs show as thumbnails in the chat and open large in an **in-page viewer**, including the ones Claude reads or links with `![](path)`. When Claude hands you a file, it shows up **in the chat as a Download card** (name, size, one tap), as long as the path it wrote exists inside `CR_FILE_ROOTS`; the download dialog still opens on the outbox where agents drop things for you.
-- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. In Chat you can also just select text with your finger; the clip is for exact text you'd rather not select by hand (a long command, a token), and it's still the way to copy from Term on a phone.
+- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. The clip is one for every session, so the **⌄** next to 📋 keeps the last four: if another session overwrote yours, it's one tap away. In Chat you can also just select text with your finger; the clip is for exact text you'd rather not select by hand (a long command, a token), and it's still the way to copy from Term on a phone.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
 - **Skills that survive the session**: a 3-layer structure (router / current state / decision log), a `skill-sync` skill that consolidates each session's findings before it closes, and `skill-lint` to catch what parallel sessions break (duplicate changelog ids, dead pointers, bloated routers).
 
@@ -345,7 +345,7 @@ Optional: `CR_STT_LANGUAGE=en` and `CR_STT_PROMPT="Postgres, Kubernetes, YourPro
 
 ## On the phone
 
-- In Chat, the message box is the keyboard and the key bar shrinks to two compact rows: esc and ^C to stop Claude, 🎤, and arrows + ⏎ to move through Claude's menus (they go straight to tmux). In Term, the full key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
+- In Chat, the message box is the keyboard and the key bar shrinks to one compact row: the tile switcher, esc and ^C to stop Claude, 🎤, and arrows + ⏎ to move through Claude's menus (they go straight to tmux). The top bar keeps ⬇ download and 📋 clip with its ⌄ history; each tile shows its mode, context % and reload / clear / full screen. In Term, the full key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
 - **Switching mode**: tap the mode pill on the tile (auto / plan / …); it sends Shift+Tab, handy when auto mode can't run and you need a session to ask you instead.
 - **Copying**: in Chat, select the text with your finger like on any web page. In Term, ask the agent to put it in the clip (`cr-clip`), then tap 📋: selecting text inside a terminal is unreliable on touch screens. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
 - If the 🎤 fails with `NotAllowedError` while the site permission is granted, the block is at the OS level, or it's a `Permissions-Policy` header from your proxy, which must allow `microphone=(self)`.
@@ -363,7 +363,7 @@ bin/
   cr-hist                  per-session file history (what changed, when, which session)
   cr-cc                    the dashboard in a terminal: state, mode, locks; peek / reply
   cr-session               what each terminal tile runs (session allowlist, tmux attach-or-create)
-  cr-clip / cr-expose      hand text / files to the human
+  cr-clip / cr-expose      hand text (last 4 kept) / files to the human
   skill-new / skill-lint   scaffold and check skills
 server/server.py           UI, /tty proxy, status API, files, dictation (Python stdlib only)
 server/chat.py             the Chat view: transcript reader, permission card, send, plan usage
