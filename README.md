@@ -1,4 +1,4 @@
-# Claude Code Control Room
+<p align="center"><img src="docs/banner.svg" alt="Claude Code Control Room: parallel Claude Code sessions, live state and locks, in one screen" width="100%"></p>
 
 [![CI](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml)
 [![Open in GitHub Codespaces](https://img.shields.io/badge/Try_it-GitHub_Codespaces-2ea44f?logo=github)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
@@ -30,9 +30,23 @@ What you get:
 - **Mode and plan usage at a glance**: each tile shows Claude Code's permission mode (auto / accept edits / plan / manual; **tap it to switch**, like Shift+Tab) and how much context the conversation uses. The top bar shows your plan's **5-hour session and weekly usage** with their reset times, read from a silent status line.
 - **Built for the phone**: the Chat view is plain web text, so you select and scroll with your finger; in Term, an on-screen key bar (Esc, arrows, Tab, Ctrl-C), swipe to scroll history, tap-to-jump between sessions. The header fits one row.
 - **Files both ways**: paste a screenshot with **Ctrl-V**, drop files, or use 📎; images and PDFs show as thumbnails in the chat and open large in an **in-page viewer**, including the ones Claude reads or links with `![](path)`. When Claude hands you a file, it shows up **in the chat as a Download card** (name, size, one tap), as long as the path it wrote exists inside `CR_FILE_ROOTS`; the download dialog still opens on the outbox where agents drop things for you.
-- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. On a phone this is *the* way to copy from a terminal.
+- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. In Chat you can also just select text with your finger; the clip is for exact text you'd rather not select by hand (a long command, a token), and it's still the way to copy from Term on a phone.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
 - **Skills that survive the session**: a 3-layer structure (router / current state / decision log), a `skill-sync` skill that consolidates each session's findings before it closes, and `skill-lint` to catch what parallel sessions break (duplicate changelog ids, dead pointers, bloated routers).
+
+### In action
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/chat-handoff.png" alt="On a phone: Claude's reply shows a chart inline, a Download card for the CSV it exported and a Copy card for the command it put in the clip; one tap copies it, another opens the chart large"><br><b>The agent hands you things.</b> A chart inline, a <b>⬇ Download</b> card for the file it wrote, a <b>📋 Copy</b> card for the command it put in the clip. One tap each, from the phone.</td>
+<td width="50%" valign="top"><img src="docs/chat-permission.png" alt="On a phone: a permission card shows the exact kubectl command Claude wants to run, with Yes / Yes, don't ask again / Esc buttons; after Yes, the command runs and Claude reports back"><br><b>Permission, with the real command.</b> The card shows exactly what Claude wants to run and one button per option. Tap <b>1. Yes</b> and it carries on.</td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/chat-attach.png" alt="On desktop: a screenshot dropped into the message box shows as a preview with a remove button; once sent it's a thumbnail in the message, Claude finds the request id from it in the logs, and the thumbnail opens large in the in-page viewer"><br><b>Show it instead of describing it.</b> Paste (Ctrl-V), drop or 📎 a screenshot or a PDF: it's previewed before you send, stays as a thumbnail in the conversation and opens large in the viewer.</td>
+</tr>
+</table>
+
+<sub>Staged like the demo above: synthetic conversations, rendered by the real UI.</sub>
 
 No frameworks, no build step, no `npm install`: Python standard library, bash, and one HTML page with its script and stylesheet.
 
@@ -256,6 +270,8 @@ Every tile has a **Chat / Term** switch (remembered per tile). Chat is a layer *
 
 - **Where the conversation comes from.** Claude Code writes each session's transcript to `~/.claude/projects/<project>/<id>.jsonl`. The state hook records that path on every event, and so does the silent status line (`hooks/cr-statusline.py`); the server reads the newest one, so the view follows `/clear`, `/resume` and compaction by itself. Reads are incremental (by byte offset) and only the tail is loaded at first. Without the hooks there is no Chat view for that tile; Term always works.
 - **Permission card.** Claude Code writes the tool call to the transcript *before* it asks, so the card shows the pending step (the whole command, or the diff) and marks it "waiting for your OK"; if it isn't there yet, it shows the box as it is on screen. Options that the terminal UI wraps across lines are joined back. The buttons send the option's key to the session (a whitelist: digits, Esc, Enter, Shift+Tab).
+- **What Claude hands you.** A file path in Claude's reply that exists inside `CR_FILE_ROOTS` becomes a **⬇ Download** card (name, size, one tap). Text Claude loads with `cr-clip` becomes a **📋 Copy** card at the point where it was loaded; its text comes from the command itself, so another session overwriting the clip later doesn't change it. Downloads and clips from the same turn sit in one row. Images and PDFs render inline: `![](path)` in a reply, and any image or PDF Claude reads. The context hook tells every session how to hand you things this way (`CR_CHAT_TIPS=0` turns that off).
+- **Attachments and the viewer.** Paste with Ctrl-V, drop, or use 📎: images and PDFs wait in a preview strip above the box (✕ removes one) until you send. In the conversation they're thumbnails; a tap opens them in an in-page viewer, with "open in a tab". Esc closes the viewer without interrupting Claude.
 - **Writing.** The message box pastes your text with bracketed paste (line breaks don't submit it halfway) and presses Enter. Attachments are saved to `uploads/` and Claude gets their paths after your text. Sending uses a navigational form into a hidden frame, never XHR, like the uploads (auth proxies can kill background POSTs). It is exactly as powerful as typing in the terminal: same auth, same sessions (`CR_SESSIONS`).
 - **Working line.** While Claude works, the chat shows its own animated line (`✻ Refactoring… (1m 12s · ↓ 6.8k tokens)`), read from the screen.
 - **Send now.** A message you send while Claude works is queued (gray). "send now" interrupts (Esc) and then presses Enter, which sends it if Claude put it back in the prompt; if Claude had already sent it, the Enter lands on an empty prompt and does nothing.

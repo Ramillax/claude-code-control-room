@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Claude Code Control Room logo">
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#262624" stroke="#3a3935" stroke-width="4"/>
+  <g fill="#171614" stroke="#3a3935" stroke-width="3">
+    <rect x="32" y="32" width="90" height="90" rx="18"/><rect x="134" y="32" width="90" height="90" rx="18" stroke="#d97757" stroke-width="5"/>
+    <rect x="32" y="134" width="90" height="90" rx="18"/><rect x="134" y="134" width="90" height="90" rx="18"/>
+  </g>
+  <g stroke="#4a4843" stroke-width="8" stroke-linecap="round">
+    <path d="M52 82h44M52 100h28M154 82h40M154 100h24M52 184h40M52 202h24M154 184h44M154 202h28"/>
+  </g>
+  <circle cx="54" cy="56" r="10" fill="#9fca87"/><circle cx="156" cy="56" r="10" fill="#e5786d"/>
+  <circle cx="54" cy="158" r="10" fill="#8ab4ff"/><circle cx="156" cy="158" r="10" fill="#9fca87"/>
+  <circle cx="128" cy="128" r="31" fill="#262624"/>
+  <path d="M117 126v-8a11 11 0 0 1 22 0v8" fill="none" stroke="#d97757" stroke-width="6" stroke-linecap="round"/>
+  <rect x="108" y="124" width="40" height="30" rx="7" fill="#d97757"/><circle cx="128" cy="137" r="4.5" fill="#262624"/><rect x="126" y="138" width="4" height="9" rx="2" fill="#262624"/>
+</svg>

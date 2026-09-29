@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="Claude Code Control Room: parallel Claude Code sessions, live state and locks, in one screen">
+  <style>
+    .t{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    .m{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  </style>
+  <rect width="1280" height="360" rx="28" fill="#171614"/>
+  <rect x="1" y="1" width="1278" height="358" rx="27" fill="none" stroke="#3a3935" stroke-width="2"/>
+  <g transform="translate(56 52)">
+    <rect x="8" y="8" width="240" height="240" rx="56" fill="#262624" stroke="#3a3935" stroke-width="4"/>
+    <g fill="#171614" stroke="#3a3935" stroke-width="3">
+      <rect x="32" y="32" width="90" height="90" rx="18"/><rect x="32" y="134" width="90" height="90" rx="18"/><rect x="134" y="134" width="90" height="90" rx="18"/>
+      <rect x="134" y="32" width="90" height="90" rx="18">
+        <animate attributeName="stroke" dur="8s" repeatCount="indefinite" keyTimes="0;.3;.32;.72;.74;1" values="#3a3935;#3a3935;#d97757;#d97757;#3a3935;#3a3935"/>
+        <animate attributeName="stroke-width" dur="8s" repeatCount="indefinite" keyTimes="0;.3;.32;.72;.74;1" values="3;3;5;5;3;3"/>
+      </rect>
+    </g>
+    <g stroke="#4a4843" stroke-width="8" stroke-linecap="round">
+      <path d="M52 100h28M154 100h24M52 202h24M154 202h28"/>
+      <path d="M52 82h4"><animate attributeName="d" dur="2.4s" repeatCount="indefinite" values="M52 82h4;M52 82h44;M52 82h44" keyTimes="0;.8;1"/></path>
+      <path d="M154 82h40"/><path d="M52 184h40"/>
+      <path d="M154 184h4"><animate attributeName="d" dur="3.1s" repeatCount="indefinite" values="M154 184h4;M154 184h44;M154 184h44" keyTimes="0;.8;1"/></path>
+    </g>
+    <circle cx="54" cy="56" r="10" fill="#9fca87"><animate attributeName="opacity" dur="1.6s" repeatCount="indefinite" values="1;.3;1"/></circle>
+    <circle cx="156" cy="56" r="10" fill="#9fca87">
+      <animate attributeName="fill" dur="8s" repeatCount="indefinite" keyTimes="0;.3;.32;.72;.74;1" values="#9fca87;#9fca87;#e5786d;#e5786d;#9fca87;#9fca87"/>
+      <animate attributeName="r" dur="8s" repeatCount="indefinite" keyTimes="0;.32;.38;.44;.5;.56;.62;.72;1" values="10;10;13;10;13;10;13;10;10"/>
+    </circle>
+    <circle cx="54" cy="158" r="10" fill="#8ab4ff"/>
+    <circle cx="156" cy="158" r="10" fill="#9fca87"><animate attributeName="opacity" dur="1.6s" begin=".8s" repeatCount="indefinite" values="1;.3;1"/></circle>
+    <g>
+      <animateTransform attributeName="transform" type="translate" dur="8s" repeatCount="indefinite" keyTimes="0;.08;.14;.86;.92;1" values="0 -18;0 -18;0 0;0 0;0 -18;0 -18"/>
+      <animate attributeName="opacity" dur="8s" repeatCount="indefinite" keyTimes="0;.08;.14;.86;.92;1" values="0;0;1;1;0;0"/>
+      <circle cx="128" cy="128" r="31" fill="#262624"/>
+      <path d="M117 126v-8a11 11 0 0 1 22 0v8" fill="none" stroke="#d97757" stroke-width="6" stroke-linecap="round"/>
+      <rect x="108" y="124" width="40" height="30" rx="7" fill="#d97757"/><circle cx="128" cy="137" r="4.5" fill="#262624"/><rect x="126" y="138" width="4" height="9" rx="2" fill="#262624"/>
+    </g>
+  </g>
+  <text x="352" y="146" class="t" font-size="54" font-weight="800" fill="#ece9e1" letter-spacing="-1">Claude Code <tspan fill="#d97757">Control Room</tspan></text>
+  <text x="354" y="196" class="t" font-size="25" fill="#a19f97">Parallel Claude Code sessions from any browser, phone included.</text>
+  <g class="t" font-size="20" font-weight="600">
+    <rect x="352" y="232" width="150" height="40" rx="20" fill="#1f2a1c" stroke="#3c5234"/><circle cx="376" cy="252" r="7" fill="#9fca87"><animate attributeName="opacity" dur="1.6s" repeatCount="indefinite" values="1;.3;1"/></circle><text x="392" y="259" fill="#cfe6c1">working</text>
+    <rect x="516" y="232" width="176" height="40" rx="20" fill="#2e1c1a" stroke="#5a2f2a">
+      <animate attributeName="stroke" dur="8s" repeatCount="indefinite" keyTimes="0;.3;.32;.72;.74;1" values="#5a2f2a;#5a2f2a;#e5786d;#e5786d;#5a2f2a;#5a2f2a"/></rect>
+    <circle cx="540" cy="252" r="7" fill="#e5786d"/><text x="556" y="259" fill="#f3c2bb">needs you</text>
+    <rect x="706" y="232" width="110" height="40" rx="20" fill="#1b2230" stroke="#33415c"/><circle cx="730" cy="252" r="7" fill="#8ab4ff"/><text x="746" y="259" fill="#c9dafc">idle</text>
+    <rect x="830" y="232" width="172" height="40" rx="20" fill="#2d2119" stroke="#5b3f2a"/><path d="M850 250v-4a6 6 0 0 1 12 0v4" fill="none" stroke="#f2c98a" stroke-width="2.6"/><rect x="846" y="249" width="20" height="15" rx="3.5" fill="#f2c98a"/><text x="876" y="259" class="m" fill="#f2c98a" font-weight="500">api:auth</text>
+  </g>
+  <text x="354" y="316" class="m" font-size="18" fill="#6f6d66">see · coordinate · remember</text>
+</svg>
