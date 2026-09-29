@@ -262,7 +262,15 @@ shell      shell
 
 ### The permission badge and the "no" case
 
-A "yes" to a permission prompt runs the tool and fires `PostToolUse`, which clears the badge. A "no", Esc or Ctrl-C fires **no hook at all** (`PermissionDenied` exists, but only for auto-mode classifier denials), so a hook-only badge stays red until your next prompt. The server closes that gap by looking at the session's pane: once it has seen the permission box on screen for the current prompt, the box disappearing means you answered. The screen is only used to *leave* the waiting state, never to enter it, and only after it has confirmed the box once, so if a Claude Code update changes how the box looks, you're simply back to hook-only behavior instead of missing an alert.
+The badge turns on with `PermissionRequest`, which fires the moment the dialog opens and names the tool and its input. (`Notification` with `permission_prompt` is kept as a fallback, but it arrives about 6 seconds later.)
+
+A "yes" runs the tool and fires `PostToolUse` for **that same call**, which clears the badge. It has to be the same call because read-only tools run as a batch: a sibling can finish while another one is still waiting for you, and its `PostToolUse` must not turn the alert off. `PermissionRequest` carries no `tool_use_id`, so the hook matches on tool name + input.
+
+A "no", Esc or Ctrl-C fires **no hook at all**, not even `Stop` (`PermissionDenied` exists, but only for auto-mode classifier denials). For a "no" or Esc, the transcript does record it: a `tool_result` with `is_error` and `toolUseResult: "User rejected tool use"`, and the server reads that. As a fallback it also looks at the session's pane: once it has seen the permission box on screen for the current prompt, the box disappearing means you answered. The screen is only used to *leave* the waiting state, never to enter it, and only after it has confirmed the box once, so if a Claude Code update changes how the box looks, you're simply back to hook + transcript behavior instead of missing an alert.
+
+Measured on a recorded session with three prompts (a "no", a parallel batch answered "yes", a parallel batch cancelled with Esc), replayed through the old and new hook: time the dialog was on screen with no badge went from 36.8 s to 0.3 s (one 0.25 s sample), and the badge now turns on as the dialog opens instead of ~6 s later.
+
+Credit: matching on tool name + input, and reading the rejection from the transcript, came out of a Reddit thread with u/NickolaiK, who measured the hook events in the VS Code extension.
 
 ## The Chat view
 

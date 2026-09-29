@@ -79,9 +79,9 @@ if os.path.exists(path):
         data = json.load(fh)                      # invalid JSON → abort loudly, change nothing
     shutil.copy2(path, path + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
 # (script, event, matcher)
-WANT = [("cr-state-hook.py", ev, "*" if ev in ("PreToolUse", "PostToolUse") else None)
-        for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-                   "Notification", "Stop", "SessionEnd")]
+WANT = [("cr-state-hook.py", ev, "*" if "Tool" in ev or ev == "PermissionRequest" else None)
+        for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+                   "PermissionRequest", "Notification", "Stop", "SessionEnd")]
 WANT += [("cr-guard-hook.py", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash"),
          ("cr-context-hook.py", "SessionStart", None),
          ("cr-context-hook.py", "SessionEnd", None),

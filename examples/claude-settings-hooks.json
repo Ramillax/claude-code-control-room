@@ -72,6 +72,28 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /PATH/TO/claude-code-control-room/hooks/cr-state-hook.py"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "hooks": [

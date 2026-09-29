@@ -218,9 +218,10 @@ def read_state(sess):
         return {}
 
 
-# Leaving "blocked" when you answer NO. The hook enters "blocked" (Notification
-# permission_prompt) and a "yes" leaves it (the tool runs → PostToolUse), but a "no", Esc or ^C
-# fires no hook, so the tile stayed red until your next prompt. The screen fills that gap:
+# Leaving "blocked" when you answer NO. The hook enters "blocked" (PermissionRequest) and a "yes"
+# leaves it (that same call runs → PostToolUse), but a "no", Esc or ^C fires no hook, so the tile
+# stayed red until your next prompt. The transcript records a "no" or Esc (rejected_since). The
+# screen covers the rest (^C, a dialog that is not a tool permission):
 # once we have SEEN the permission box for this blocked episode, its disappearance means the
 # question was answered. The screen is only ever used to LEAVE "blocked", never to enter it, and
 # only after it confirmed the box once — so if a Claude Code UI update breaks these patterns,
@@ -238,11 +239,51 @@ def pane_shows_permission(sess, pane=""):
     return bool(PERMISSION_BOX.search(r.stdout.decode(errors="replace")))
 
 
+REJECTED = b'"toolUseResult":"User rejected tool use"'
+
+
+def _line_ts(line):
+    try:
+        return datetime.fromisoformat(json.loads(line)["timestamp"].replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def rejected_since(transcript, ts, window=65536, limit=8 << 20):
+    """True if the transcript recorded a rejected permission ("no" or Esc) after ts. Claude Code
+    writes it as a tool_result with is_error and toolUseResult "User rejected tool use".
+    Reads backwards, widening the window until it reaches a line older than ts: the line written
+    right after a rejection can weigh 100 KB+ (measured), so a fixed tail misses it."""
+    try:
+        with open(transcript, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            while True:
+                start = max(0, size - window)
+                fh.seek(start)
+                lines = fh.read().splitlines()[1 if start else 0:]      # the first one may be cut
+                for line in reversed(lines):
+                    when = _line_ts(line)
+                    if when is None:
+                        continue
+                    if when < ts:
+                        return False                                 # back before the dialog opened
+                    if REJECTED in line.replace(b'": "', b'":"'):
+                        return True
+                if start == 0 or window >= limit:
+                    return False
+                window *= 4
+    except Exception:
+        return False
+
+
 def effective_state(sess):
     s = read_state(sess)
     st = s.get("state") or "unknown"      # no hook event yet (or hooks not installed)
     if st != "blocked":
         return st
+    if s.get("transcript") and rejected_since(s["transcript"], s.get("ts", 0)):
+        return "idle"                     # "no" or Esc: no hook fires, but the transcript says so
     on_screen = pane_shows_permission(sess, s.get("pane", ""))
     if on_screen:
         _box_seen[sess] = s.get("ts", 0)

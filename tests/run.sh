@@ -90,6 +90,51 @@ else
   echo "  (tmux not installed: skipped)"
 fi
 
+echo "blocked badge with parallel tool calls + a 'no' read from the transcript"
+res=$(python3 - "$HERE" "$T" <<'EOF'
+import importlib.util, io, json, os, sys, types
+here, t = sys.argv[1], sys.argv[2]
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+hook = load("hook", os.path.join(here, "hooks", "cr-state-hook.py"))
+hook.STATE_DIR = os.path.join(t, "pstate"); hook.tmux_session = lambda: "claude1"
+out, now = [], [1000]
+hook.time = types.SimpleNamespace(time=lambda: now[0])
+def fire(name, tool="", inp=None, **kw):
+    now[0] += 1
+    sys.stdin = io.StringIO(json.dumps(dict(hook_event_name=name, tool_name=tool, tool_input=inp, **kw)))
+    hook.main()
+    return json.load(open(os.path.join(t, "pstate", "claude1.json")))
+# the measured sequence: a sleep and a Read run as one batch, the Read waits for permission
+fire("UserPromptSubmit")
+fire("PreToolUse", "Bash", {"command": "sleep 8"})
+fire("PreToolUse", "Read", {"file_path": "/etc/hostname"})
+s = fire("PermissionRequest", "Read", {"file_path": "/etc/hostname"}); out.append(s["state"]); ts = s["ts"]
+s = fire("Notification", notification_type="permission_prompt"); out.append(str(s["ts"] == ts))
+s = fire("PostToolUse", "Bash", {"command": "sleep 8"}); out.append(s["state"])
+s = fire("PostToolUse", "Read", {"file_path": "/etc/hostname"}); out.append(s["state"])
+# a "no": no hook fires, the transcript records it (after a 100 KB+ line, as measured)
+srv = load("srv", os.path.join(here, "server", "server.py"))
+tr = os.path.join(t, "reject.jsonl")
+def line(ts, **kw): return json.dumps(dict(timestamp=ts, **kw), separators=(",", ":"))
+with open(tr, "w") as fh:
+    fh.write(line("2026-01-01T00:00:00.000Z", type="assistant") + "\n")
+    fh.write(line("2026-01-01T00:00:30.000Z", type="user", toolUseResult="User rejected tool use") + "\n")
+    fh.write(line("2026-01-01T00:00:30.002Z", type="attachment", pad="x" * 150000) + "\n")
+t0 = 1767225600   # 2026-01-01T00:00:00Z
+out.append(str(srv.rejected_since(tr, t0 + 10)))   # the dialog opened at :10 → answered "no"
+out.append(str(srv.rejected_since(tr, t0 + 40)))   # a newer dialog (:40) → still waiting
+print(" ".join(out))
+EOF
+)
+check "PermissionRequest → blocked"                        '[ "$(cut -d" " -f1 <<<"$res")" = blocked ]'
+check "late Notification keeps the same episode"          '[ "$(cut -d" " -f2 <<<"$res")" = True ]'
+check "a sibling call finishing does not clear the badge" '[ "$(cut -d" " -f3 <<<"$res")" = blocked ]'
+check "the approved call running clears it"               '[ "$(cut -d" " -f4 <<<"$res")" = working ]'
+check "a 'no' in the transcript is found past a 150 KB line" '[ "$(cut -d" " -f5 <<<"$res")" = True ]'
+check "…but an older 'no' does not clear a newer dialog"  '[ "$(cut -d" " -f6 <<<"$res")" = False ]'
+
 echo "cr-hist + cr-history-hook"
 HP="$T/hproj"; mkdir -p "$HP/src"
 git -C "$HP" init -q; git -C "$HP" config user.email t@t; git -C "$HP" config user.name t
