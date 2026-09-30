@@ -308,4 +308,18 @@ check "text left in the input box is read, multi-line" "grep -qF \"draft 'line o
 check "empty box and dimmed hint are not a draft"    "grep -qF \"empty ''\" \"\$T/setup.out\" && grep -qF \"hint ''\" \"\$T/setup.out\""
 check "no input box on screen → None"                'grep -qF "nobox None" "$T/setup.out"'
 
+python3 - "$HERE/server" "$T" > "$T/keep.out" <<'EOF'
+import os, sys
+sys.path.insert(0, sys.argv[1]); import chat
+up = os.path.join(sys.argv[2], "uploads", "2026-01-01"); os.makedirs(up, exist_ok=True)
+img = os.path.join(up, "120000_photo.jpg"); open(img, "w").close()
+sent = []
+chat.draft = lambda s, *a: " " + img + " "            # the upload dialog typed this, no Enter
+chat.clear_draft = lambda s: True
+chat._run = lambda cmd, inp=None, **k: (sent.append(inp) if inp else None) or type("R", (), {"returncode": 0})()
+chat.send("s", ["s"], text="look at this")
+print("kept" if sent and img in sent[0] and sent[0].startswith("look at this") else "lost " + repr(sent))
+EOF
+check "an uploaded path left in the input box joins the chat message" 'grep -qx kept "$T/keep.out"'
+
 [ $FAIL = 0 ] && echo "all tests passed" || { echo "SOME TESTS FAILED"; exit 1; }

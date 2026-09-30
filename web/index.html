@@ -510,6 +510,12 @@ function showPreview(file){
 }
 // auto=true (pasted): the session is where you pasted, nothing to choose — upload right away.
 function openUpload(sess, files, auto){
+  // A tile of that session in Chat mode: the file goes to ITS message box as an attachment (preview,
+  // sent with the message). This dialog types the path into the terminal's input box, which the Chat
+  // view doesn't show, and the next chat message replaced it: the path was lost.
+  const ct = [tilesArr()[activeIdx], ...tilesArr()].find(t=> t && t.dataset.mode === "chat" && t._addFiles
+    && (t.querySelector("select") || {}).value === sess);
+  if(ct){ if(files && files.length) ct._addFiles(files); else ct._pickFiles(); return; }
   upsel.innerHTML = SESSIONS.map(s=>`<option value="${esc(s)}"${s===sess?" selected":""}>${esc(s)}</option>`).join("");
   upfile.value = ""; showPreview(null);
   if(files && files.length){

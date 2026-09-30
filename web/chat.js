@@ -445,6 +445,7 @@ function wireChat(tile, idx){
   prev.addEventListener("click", e=>{ const b = e.target.closest(".x"); if(!b) return;
     const [p] = pending.splice(+b.dataset.i, 1); if(p && p.url) URL.revokeObjectURL(p.url); drawPrev(); });
   tile.querySelector(".attbtn").addEventListener("click", ()=> fin.click());
+  tile._addFiles = list=>{ addFiles(list); ta.focus(); }; tile._pickFiles = ()=> fin.click();   // the upload button in Chat mode
   fin.addEventListener("change", ()=>{ addFiles(fin.files); fin.value = ""; });
   ta.addEventListener("paste", e=>{
     const fs = [...(e.clipboardData && e.clipboardData.files || [])];

@@ -401,8 +401,15 @@ def send(sess, allowed, text=None, key=None, choose=None, clear=False):
     text = (text or "").replace("\r\n", "\n").strip()
     if not text:
         return False
-    if draft(sess):          # text left in the box (Esc put a message back): replace it, don't glue onto it
+    left = draft(sess)
+    if left:                 # text left in the box (Esc put a message back): replace it, don't glue onto it
         clear_draft(sess)
+        # …except paths of uploaded files (the upload dialog types them there without Enter): they're
+        # added to the message, otherwise the attachment was lost silently
+        ups = [p for p in re.findall(r"(?:^|\s)(/\S+/uploads/\d{4}-\d\d-\d\d/\S+)", left.replace("\n", " "))
+               if os.path.isfile(p) and p not in text]
+        if ups:
+            text = text + "\n\n" + "\n".join(ups)
     # bracketed paste: line breaks don't submit the message halfway through
     buf = "cr-chat-" + sess
     r = _run(TMUX + ["load-buffer", "-b", buf, "-"], inp=text)
