@@ -69,8 +69,10 @@ function md(src){
   return out.join("");
 }
 
-// ── Attachments: images and PDFs, as thumbnails / cards that open in the in-page viewer ──────
-const ATT_RE = /(?:^|[\s(`'"])(\/[^\s`'"()<>]+\.(?:png|jpe?g|gif|webp|pdf))(?=$|[\s)`'".,;:])/gi;
+// ── Attachments: images and PDFs open in the in-page viewer; any other uploaded file is a card ──
+// that downloads it (uploads/<day>/HHMMSS_<name> is how the server names what you attach)
+const ATT_RE = /(?:^|[\s(`'"])(\/[^\s`'"()<>]+\.(?:png|jpe?g|gif|webp|pdf)|\/[^\s`'"()<>]*\/uploads\/\d{4}-\d\d-\d\d\/\d{6}_[^\s`'"()<>]+\.[a-z0-9]{1,5})(?=$|[\s)`'".,;:])/gi;
+const extLabel = n => ((String(n).match(/\.([a-z0-9]{1,5})$/i) || [,"FILE"])[1]).toUpperCase();
 const viewURL = p => "view?p=" + encodeURIComponent(p);
 function attHTML(path){
   const name = String(path).split("/").pop(), web = /^https?:/i.test(path);
@@ -80,6 +82,8 @@ function attHTML(path){
     const src = web ? esc(path) : viewURL(path);
     return `<a class="att-img" title="${esc(name)}" href="${src}" target="_blank" rel="noopener"><img loading="lazy" alt="${esc(name)}" onerror="this.parentNode.classList.add('broken')" src="${src}"></a>`;
   }
+  if(/^\//.test(path))
+    return `<a class="att-pdf other" href="dl?p=${encodeURIComponent(path)}" download="${esc(name)}" title="${esc(path)}"><span class="ic">${esc(extLabel(name))}</span><span class="nm">${esc(name)}</span></a>`;
   return esc(path);
 }
 function pathsIn(text){ const out = []; let m; ATT_RE.lastIndex = 0; while((m = ATT_RE.exec(text))) out.push(m[1]); return [...new Set(out)]; }
@@ -342,8 +346,71 @@ function chatSend(idx, fields, files){
   Object.entries({s:c.sel.value, ...fields}).forEach(([k,v])=>{
     const i = document.createElement("input"); i.type = "hidden"; i.name = k; i.value = v; f.append(i);
   });
+  // The answer lands in the hidden iframe: nobody would see a failed send (a proxy body cap,
+  // a session that is gone…), so a missing data-ok becomes a note in the chat.
+  const sink = document.querySelector('iframe[name="chatsink"]');
+  if(sink) sink.onload = ()=>{ sink.onload = null;
+    let ok = false, why = "";
+    try{ const d = sink.contentDocument; ok = !!d.querySelector("[data-ok]"); why = (d.body && d.body.innerText || "").trim().slice(0,160); }catch(e){ why = "no readable answer"; }
+    if(ok) return;
+    c.msgs.querySelectorAll(".m-u.pend").forEach(p=> p.classList.add("fail"));
+    const n = document.createElement("div"); n.className = "note";
+    n.textContent = "⚠ not sent" + (files && files.length ? " (with attachments)" : "") + (why ? ": " + why : "");
+    c.msgs.append(n); c.msgs.scrollTop = c.msgs.scrollHeight; };
   document.body.append(f); f.submit(); f.remove();
   setTimeout(()=> pollChat(idx), 700);
+}
+// A navigational POST into an iframe of its own, as a promise (auth proxies can kill XHR POSTs).
+// → {ok, text, path}; path = the data-path the last piece of a large attachment returns.
+function sinkPost(fields, file){
+  return new Promise(async res=>{
+    const name = "up" + Math.random().toString(36).slice(2);
+    const ifr = document.createElement("iframe"); ifr.name = name; ifr.hidden = true;
+    // Into the DOM first and wait for its about:blank: otherwise that first load is taken as the
+    // answer (empty ⇒ "failed") and the submit, with the frame not ready, opens the answer in a new tab.
+    await new Promise(r=>{ ifr.onload = r; ifr.src = "about:blank"; document.body.append(ifr); setTimeout(r, 1500); });
+    const f = document.createElement("form"); f.method = "post"; f.action = "chat/send";
+    f.target = name; f.hidden = true; f.enctype = "multipart/form-data";
+    const dt = new DataTransfer(); dt.items.add(file);
+    const fi = document.createElement("input"); fi.type = "file"; fi.name = "f"; fi.files = dt.files; f.append(fi);
+    Object.entries(fields).forEach(([k,v])=>{ const i = document.createElement("input"); i.type = "hidden"; i.name = k; i.value = v; f.append(i); });
+    ifr.onload = ()=>{ let r = {ok:false, text:"no readable answer", path:""};
+      try{ const d = ifr.contentDocument, pe = d.querySelector("[data-path]");
+        r = {ok: !!d.querySelector("[data-ok]"), text: (d.body && d.body.innerText || "").trim().slice(0,160), path: pe ? pe.dataset.path : ""}; }catch(e){}
+      ifr.remove(); res(r); };
+    document.body.append(f); f.submit(); f.remove();
+  });
+}
+// Attachments over 90 MB in total: each file goes in 40 MB pieces (Cloudflare caps a body at 100 MB),
+// one at a time, each with its SHA-256; then the text with the paths is sent like any message.
+const CHUNK = 40*1024*1024;
+async function chunkedSend(idx, text, files, bubble){
+  const c = chatEls(idx); if(!c) return;
+  const prog = document.createElement("div"); prog.className = "uprog"; bubble.append(prog);
+  const fail = why=>{ bubble.classList.add("fail"); prog.textContent = "";
+    const n = document.createElement("div"); n.className = "note"; n.textContent = "⚠ not sent: " + why;
+    c.msgs.append(n); c.msgs.scrollTop = c.msgs.scrollHeight; };
+  const paths = [], total = files.reduce((n,f)=> n + f.size, 0); let done = 0;
+  for(const file of files){
+    const n = Math.max(1, Math.ceil(file.size / CHUNK)), up = Math.random().toString(36).slice(2, 14).padEnd(8, "0");
+    if(n > 64) return fail(file.name + " is too large (max ~2.5 GB)");
+    for(let i = 0; i < n; i++){
+      prog.textContent = `uploading ${Math.round(done / total * 100)}%  (${(done/1048576).toFixed(0)} of ${(total/1048576).toFixed(0)} MB)`;
+      const part = new File([file.slice(i*CHUNK, (i+1)*CHUNK)], file.name, {type: "application/octet-stream"});
+      const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await part.arrayBuffer()))]
+        .map(b=> b.toString(16).padStart(2, "0")).join("");                 // the server checks it before appending
+      let r;
+      for(let t = 0; t < 3; t++){                                           // damaged piece or network hiccup: retry
+        r = await sinkPost({up, ui: i, un: n, sha, sz: file.size, s: c.sel.value}, part);
+        if(r.ok) break;
+      }
+      if(!r.ok) return fail(file.name + ", piece " + (i+1) + "/" + n + ": " + r.text);
+      done += part.size;
+      if(i === n - 1) paths.push(r.path);
+    }
+  }
+  prog.textContent = "uploaded ✔ (SHA-256 checked per piece)";
+  chatSend(idx, {text: (text ? text + "\n\n" : "") + paths.join("\n")});
 }
 function chatHTML(){
   const clip = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg>';
@@ -352,8 +419,8 @@ function chatHTML(){
     '<div class="working"><span class="star">✻</span><span class="verb">Working…</span><span class="meta"></span></div>' +
     '<div class="cperm" hidden></div>' +
     '<div class="ccwrap"><div class="cprev"></div><div class="ccomp">' +
-    `<button type="button" class="attbtn" title="attach images or PDFs (or paste / drop them)">${clip}</button>` +
-    '<input type="file" multiple accept="image/*,application/pdf" hidden>' +
+    `<button type="button" class="attbtn" title="attach files: images, PDFs, zips… (or paste / drop them)">${clip}</button>` +
+    '<input type="file" multiple hidden>' +
     '<textarea rows="1" placeholder="Message Claude…  (Enter sends · Shift+Enter new line · paste images)"></textarea>' +
     `<button type="button" class="sendbtn" title="send">${up}</button></div></div>`;
 }
@@ -361,13 +428,13 @@ function wireChat(tile, idx){
   const msgs = tile.querySelector(".cmsgs"), ta = tile.querySelector("textarea"), btn = tile.querySelector(".sendbtn");
   const prev = tile.querySelector(".cprev"), fin = tile.querySelector('.ccomp input[type="file"]'), chat = tile.querySelector(".chat");
   let pending = [];                                   // [{file, url}]
-  const okFile = f => /^image\//.test(f.type) || f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+  const okFile = f => f.size > 0;                    // any type (the server keeps whatever arrives); size 0 = a dropped folder
   const grow = ()=>{ btn.disabled = !ta.value.trim() && !pending.length; ta.style.height = "auto";
     if(ta.scrollHeight) ta.style.height = Math.min(ta.scrollHeight, 150) + "px"; };   // measures 0 outside the DOM
   const drawPrev = ()=>{
     prev.innerHTML = pending.map((p,i)=> /^image\//.test(p.file.type)
       ? `<div class="pv"><img src="${p.url}" alt=""><button type="button" class="x" data-i="${i}">✕</button></div>`
-      : `<div class="pv pdf"><span class="ic">PDF</span><span class="nm">${esc(p.file.name)}</span><button type="button" class="x" data-i="${i}">✕</button></div>`).join("");
+      : `<div class="pv pdf${extLabel(p.file.name)==="PDF"?"":" other"}"><span class="ic">${esc(extLabel(p.file.name))}</span><span class="nm">${esc(p.file.name)}</span><button type="button" class="x" data-i="${i}">✕</button></div>`).join("");
     grow();
   };
   const addFiles = list => { [...list].filter(okFile).forEach(f=>{
@@ -389,16 +456,18 @@ function wireChat(tile, idx){
     chat.classList.remove("drop"); addFiles(e.dataTransfer.files); ta.focus(); });
   const send = ()=>{
     const text = ta.value.trim(); if(!text && !pending.length) return;
+    const big = pending.reduce((n,x)=> n + x.file.size, 0) > 90*1024*1024;   // proxies cap a body at ~100 MB → in pieces
     const p = document.createElement("div"); p.className = "m-u pend";
     if(text){ const t = document.createElement("div"); t.textContent = text; p.append(t); }
     if(pending.length) p.insertAdjacentHTML("beforeend", '<div class="atts">' + pending.map(x=> x.url
-      ? `<span class="att-img"><img src="${x.url}" alt=""></span>` : `<span class="att-pdf"><span class="ic">PDF</span><span class="nm">${esc(x.file.name)}</span></span>`).join("") + "</div>");
+      ? `<span class="att-img"><img src="${x.url}" alt=""></span>` : `<span class="att-pdf${extLabel(x.file.name)==="PDF"?"":" other"}"><span class="ic">${esc(extLabel(x.file.name))}</span><span class="nm">${esc(x.file.name)}</span></span>`).join("") + "</div>");
     // Still gray after 1.5 s = QUEUED (Claude is busy): offer "send now". This doesn't rely on the
     // tile's state, which can lag; if the message was delivered, the pending bubble is already gone.
     setTimeout(()=>{ if(p.isConnected && !p.querySelector(".sendnow"))
       p.insertAdjacentHTML("afterbegin", '<button type="button" class="sendnow" title="interrupt what Claude is doing so it reads this now (Esc + Enter)">send now</button>'); }, 1500);
     msgs.append(p); msgs.scrollTop = msgs.scrollHeight;
-    chatSend(idx, {text}, pending.map(x=> x.file));
+    if(big) chunkedSend(idx, text, pending.map(x=> x.file), p);
+    else chatSend(idx, {text}, pending.map(x=> x.file));
     pending = []; prev.innerHTML = ""; ta.value = ""; grow();
   };
   ta.addEventListener("keydown", e=>{ if(e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); send(); } });
@@ -447,7 +516,7 @@ setInterval(()=> tilesArr().forEach((_, i)=> pollChat(i)), 1500);
   }
   document.addEventListener("click", e=>{
     const a = e.target.closest(".att-img, .att-pdf, .pv img");
-    if(!a || e.target.closest("#lightbox") || a.classList.contains("broken")) return;
+    if(!a || e.target.closest("#lightbox") || a.classList.contains("broken") || a.classList.contains("other")) return;   // "other" downloads
     e.preventDefault();
     if(a.matches(".pv img")) return open(a.src, "preview", false);
     const href = a.getAttribute("href") || (a.querySelector("img") || {}).src; if(!href) return;

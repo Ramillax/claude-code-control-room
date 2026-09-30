@@ -47,6 +47,13 @@ jobs:
           curl -fsS -o chat.css.out http://127.0.0.1:7680/chat.css && grep -q 'cperm' chat.css.out
           curl -fsS "http://127.0.0.1:7680/api/chat?s=shell" | python3 -c 'import json,sys; json.load(sys.stdin)'
           curl -fsS http://127.0.0.1:7680/api/usage | python3 -c 'import json,sys; json.load(sys.stdin)'
+          # a large attachment in pieces: a damaged piece is refused, the good ones reassemble byte for byte
+          head -c 3000000 /dev/urandom > big.bin; split -b 1000000 -d big.bin pz.
+          bad=$(curl -s -F "f=@pz.00;filename=big.zip" -F up=smoke0bad -F ui=0 -F un=3 -F sha="$(printf '0%.0s' $(seq 64))" -F sz=3000000 -F s=shell http://127.0.0.1:7680/chat/send)
+          grep -q 'SHA-256 mismatch' <<<"$bad"
+          i=0; for f in pz.*; do out=$(curl -fsS -F "f=@$f;filename=big.zip" -F up=smoke0good -F ui=$i -F un=3 -F sha="$(sha256sum "$f" | cut -c1-64)" -F sz=3000000 -F s=shell http://127.0.0.1:7680/chat/send); i=$((i+1)); done
+          got=$(grep -o "data-path='[^']*'" <<<"$out" | cut -d"'" -f2)
+          cmp big.bin "$got"
           cat "$RUNNER_TEMP/cr.log"
       - name: slog locks (hierarchical conflict)
         run: |

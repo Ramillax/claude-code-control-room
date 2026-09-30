@@ -23,7 +23,7 @@ Why forms and not fetch() for uploads/dictation: some auth proxies (e.g. Cloudfl
 background XHR/fetch POSTs with an interactive challenge page, which silently kills them.
 A normal form POST that targets an iframe is a navigation, so it passes. Keep that pattern.
 """
-import html, json, mimetypes, os, re, select, shutil, socket, subprocess, sys, time
+import hashlib, html, json, mimetypes, os, re, select, shutil, socket, subprocess, sys, time
 import urllib.error, urllib.request
 from datetime import datetime
 from email import policy
@@ -932,6 +932,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._page(413, "<p class='warn'>message too long</p>")
             q, files = parse_qs(self.rfile.read(n).decode("utf-8", "replace"), keep_blank_values=True), []
         g = lambda k: (q.get(k) or [""])[0]
+        if g("up"):                     # one piece of a large attachment (see handle_chunk)
+            return self.handle_chunk(g("up"), g("ui"), g("un"), files, g("sha"), g("sz"))
         text = g("text").strip()
         if files:
             paths = [p for p, _, _ in self.save_files(files)]
@@ -939,6 +941,46 @@ class Handler(SimpleHTTPRequestHandler):
         ok = chat.send(g("s"), SESSIONS, text=text or None, key=g("key") or None,
                         choose=g("pick") or None, clear=g("clear") == "1")
         self._page(200 if ok else 400, "<p class='ok'>✔</p>" if ok else "<p class='warn'>could not type into the session</p>", ok=ok)
+
+    # Attachments over ~90 MB arrive in sequential pieces: proxies cap a request body (Cloudflare at
+    # 100 MB) and fail it silently. The browser sends each piece with its SHA-256 and waits for the
+    # answer; a piece that does not match is NOT appended (the browser retries it), so a file is never
+    # assembled from a damaged piece. The last one checks the total size, moves the file into
+    # uploads/<day>/ and returns its path in data-path. Nothing is typed: the browser sends the
+    # message with the paths at the end, as plain text.
+    def handle_chunk(self, up, ui, un, files, sha="", sz=""):
+        if not re.fullmatch(r"[a-z0-9]{8,32}", up) or not ui.isdigit() or not un.isdigit() \
+                or not (0 <= int(ui) < int(un) <= 64) or len(files) != 1:
+            return self._page(400, "<p class='warn'>✗ invalid piece</p>")
+        ui, un = int(ui), int(un)
+        fn, raw = files[0]
+        if not re.fullmatch(r"[0-9a-f]{64}", sha) or hashlib.sha256(raw).hexdigest() != sha:
+            return self._page(400, f"<p class='warn'>✗ piece {ui+1}/{un} arrived damaged (SHA-256 mismatch)</p>")
+        partdir = os.path.join(UPLOAD_DIR, ".parts")
+        os.makedirs(partdir, exist_ok=True)
+        tmp = os.path.join(partdir, up)
+        if ui > 0 and not os.path.exists(tmp):
+            return self._page(400, "<p class='warn'>✗ the start of the file was lost</p>")
+        with open(tmp, "wb" if ui == 0 else "ab") as fh:
+            fh.write(raw)
+        if ui < un - 1:
+            return self._page(200, f"<p class='ok'>✔ piece {ui+1}/{un}</p>", ok=True)
+        if not sz.isdigit() or os.path.getsize(tmp) != int(sz):
+            got = os.path.getsize(tmp)
+            os.remove(tmp)
+            return self._page(400, f"<p class='warn'>✗ the assembled file is {got} bytes, expected {html.escape(sz)}</p>")
+        destdir = os.path.join(UPLOAD_DIR, datetime.now().strftime("%Y-%m-%d"))
+        os.makedirs(destdir, exist_ok=True)
+        base, ext = os.path.splitext(sane_name(fn))
+        ext, stamp = ext.lower(), datetime.now().strftime("%H%M%S")
+        path = os.path.join(destdir, f"{stamp}_{base}{ext}")
+        i = 1
+        while os.path.exists(path):
+            path = os.path.join(destdir, f"{stamp}_{base}-{i}{ext}")
+            i += 1
+        os.replace(tmp, path)
+        self._page(200, f"<p class='ok' data-path='{html.escape(path, quote=True)}'>✔ {html.escape(path)} "
+                        f"({human(os.path.getsize(path))})</p>", ok=True)
 
     # Like /dl but INLINE and only images/PDF: chat thumbnails and the in-page viewer use it.
     def send_view(self, q):

@@ -206,6 +206,9 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
   background:rgba(0,0,0,.22);color:var(--fg);text-decoration:none;font-size:12.5px;max-width:260px}
 .att-pdf:hover{border-color:var(--accent)}
 .att-pdf .ic,.pv .ic{width:26px;height:32px;border-radius:4px;background:#b54a3c;color:#fff;font:700 9px system-ui;display:grid;place-items:center;flex:0 0 auto}
+.att-pdf.other .ic,.pv.other .ic{background:#4a4037;color:#f0c9a8}   /* zip, xlsx…: like the Download card */
+.m-u.pend.fail{outline:1px dashed #b54a3c}
+.m-u .uprog{font-size:11.5px;opacity:.75;margin-top:4px;font-variant-numeric:tabular-nums}
 /* a tile with no Claude (shell, ssh, another program): say so, offer to start it, lock the box */
 .awaycard{margin:auto;max-width:420px;text-align:center;padding:22px 18px;border:1px dashed var(--border);border-radius:14px;background:rgba(0,0,0,.18)}
 .awaycard .aw-ic{font-size:26px;color:var(--muted);margin-bottom:6px}
