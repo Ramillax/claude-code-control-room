@@ -31,7 +31,16 @@ check "bash redirect into a locked file"       'guard bob Bash "{\"command\":\"e
 check "bash sed -i on a locked file"           'guard bob Bash "{\"command\":\"sed -i s/a/b/ README.md\"}"'
 check "bash read of a locked file is allowed"  '! guard bob Bash "{\"command\":\"grep x src/auth/a.py\"}"'
 check "direct write to the board is denied"    'guard alice Bash "{\"command\":\"echo x >> $SLOG_BOARD\"}"'
-check "stale locks are not enforced"           '! SLOG_STALE_HOURS=-1 guard bob Edit "{\"file_path\":\"src/auth/login.py\"}"'
+git init -q "$T/proj"; mkdir -p "$T/other"; git init -q "$T/other"
+guardin() { printf '{"tool_name":"Bash","tool_input":{"command":"%s"},"cwd":"%s"}' "$3" "$2" \
+          | SLOG_TAG="$1" python3 "$HERE/hooks/cr-guard-hook.py" | grep -q '"deny"'; }
+check "git add -A in a repo with a foreign lock"  'guardin bob "$T/proj" "git add -A && git commit -m x"'
+check "git commit -am in that repo"               'guardin bob "$T/proj/src" "git commit -am x"'
+check "git -C into that repo, stash"              'guardin bob "$T/other" "git -C $T/proj stash"'
+check "…but not for the lock owner"               '! guardin alice "$T/proj" "git add -A"'
+check "naming files explicitly is allowed"        '! guardin bob "$T/proj" "git commit -m x -- src/web/app.js"'
+check "whole-tree git in another repo is allowed" '! guardin bob "$T/other" "git add -A"'
+check "stale locks are not enforced"         '! SLOG_STALE_HOURS=-1 guard bob Edit "{\"file_path\":\"src/auth/login.py\"}"'
 
 echo "cr-notes + cr-context-hook"
 (cd "$T/proj" && SLOG_TAG=alice "$HERE/bin/cr-notes" dont "don't bump pg" >/dev/null)

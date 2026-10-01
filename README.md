@@ -197,7 +197,7 @@ An advisory lock only holds while every session reads the board and chooses to r
 slog take "api:auth" --paths 'src/auth/*,docs/auth.md'   # lock + the files it covers
 ```
 
-- **`hooks/cr-guard-hook.py`** (PreToolUse). While you hold that lock, any **other** session that tries `Edit`/`Write` on those files gets the call **denied**, with who holds it and what to do. Shell writes (`> file`, `tee`, `sed -i`, `mv`/`cp`/`rm`) are checked too, but that part is best effort: a script that writes the file from the inside isn't detected. It stops accidents, not a session determined to get around it. It also refuses direct writes to the board itself, so the only write path is `slog` (flock + atomic replace).
+- **`hooks/cr-guard-hook.py`** (PreToolUse). While you hold that lock, any **other** session that tries `Edit`/`Write` on those files gets the call **denied**, with who holds it and what to do. Shell writes (`> file`, `tee`, `sed -i`, `mv`/`cp`/`rm`) are checked too, but that part is best effort: a script that writes the file from the inside isn't detected. It stops accidents, not a session determined to get around it. A git command that sweeps the whole tree (`add -A`, `commit -a`, `stash`, `reset --hard`, `checkout .`) is denied too while another session holds locked files in that repo, so one session's commit can't pick up another's half-finished work; naming the files (`git commit -- <path>`) still works. It also refuses direct writes to the board itself, so the only write path is `slog` (flock + atomic replace).
 - **`hooks/cr-context-hook.py`** (SessionStart / SessionEnd). Every new session, and every session after `/clear` or compaction, starts with the live locks, the recent feed and the project notes already in its context. When a session exits, its locks are released.
 - **Stale locks are never enforced.** If a session crashes, its lock turns ⚠stale after `SLOG_STALE_HOURS` (default 4) and stops blocking anyone. A hard lock left behind by a dead session is worse than the odd warning.
 
@@ -430,7 +430,7 @@ All settings live in `controlroom.env` (see `controlroom.env.example`, where eve
 
 - Linux only. This release was tested with tmux 3.4, ttyd 1.7.4 and Python 3.12. The UI comes from a panel used daily on desktop Chrome and Android browsers; iOS Safari is untested.
 - Single user by design: whoever passes your auth proxy is you.
-- Locks are advisory unless taken with `--paths`, and even then only file edits are enforced exactly. Shell writes are checked best effort, and anything outside the filesystem (a database, a remote API) is only as safe as the agents' cooperation. For those, put a compare-and-swap in the write path itself.
+- Locks are advisory unless taken with `--paths`, and even then only file edits are enforced exactly. Shell writes and whole-tree git commands are checked best effort, and anything outside the filesystem (a database, a remote API) is only as safe as the agents' cooperation. For those, put a compare-and-swap in the write path itself.
 - The state dot reflects the last hook event (plus the on-screen check for a pending permission). A session that was killed abruptly can show a stale state until its tmux session is gone (then it shows "off").
 - The "no" case of the permission badge is detected when the panel polls. If you answer before any poll has seen the prompt (nobody had the panel open), the badge behaves as before and clears on your next prompt.
 

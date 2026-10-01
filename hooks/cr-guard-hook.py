@@ -18,6 +18,10 @@ What it covers, honestly:
     mv/cp/rm/truncate/touch <target>) and checks those targets. A script that writes the file
     from the inside (python -c, a Makefile, git checkout) is not detected. It stops accidents,
     not a session determined to get around it.
+  · Bash git that sweeps the whole tree (add -A / add . / commit -a / stash / reset --hard /
+    checkout . / restore . / clean) is denied while another session holds a --paths lock inside
+    that repo: one session's commit must not pick up another session's half-finished work.
+    Naming files explicitly (`git commit -- path`) still works.
   · Stale locks (older than SLOG_STALE_HOURS, default 4) are NOT enforced: a crashed session
     must never block everyone else. `slog status` shows them as ⚠stale.
   · Your own locks never block you. "You" = the tmux session name, same as slog (SLOG_TAG overrides).
@@ -37,6 +41,10 @@ FILE_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path
 # Bash: commands whose (non-option) arguments are write targets
 WRITERS = {"tee", "truncate", "touch", "rm", "unlink", "shred"}
 TARGET_LAST = {"mv", "cp", "install", "ln", "rsync"}
+# git commands that act on the whole working tree instead of named paths
+TREE_GIT = re.compile(
+    r"\bgit\b[^;&|\n]*?\s(add\s+(-A|--all|\.)(\s|$)|commit\b[^;&|\n]*\s(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)"
+    r"|stash\b|reset\s+--hard|checkout\s+(--\s+)?\.(\s|$)|restore\s+(-\S+\s+)*\.(\s|$)|clean\b)")
 
 
 def me():
@@ -117,6 +125,26 @@ def bash_targets(command):
     return [t for t in targets if t and t not in ("/dev/null", "-") and not t.startswith("&")]
 
 
+def repo_root(path):
+    r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True, timeout=5)
+    return os.path.realpath(r.stdout.strip()) if r.returncode == 0 else ""
+
+
+def glob_base(g):
+    """The literal directory part of a glob: 'src/auth/*' → 'src/auth'."""
+    head = re.split(r"[*?\[]", g, 1)[0]
+    return head if head.endswith("/") or not re.search(r"[*?\[]", g) else os.path.dirname(head)
+
+
+def tree_git_repo(command, cwd):
+    """Repo root a whole-tree git command acts on, or '' if the command isn't one."""
+    if not TREE_GIT.search(command):
+        return ""
+    m = re.search(r"\bgit\s+-C\s+(\S+)", command)
+    return repo_root(norm(m.group(1), cwd) if m else cwd)
+
+
 def deny(reason):
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -129,15 +157,29 @@ def main():
     inp = ev.get("tool_input") or {}
     cwd = ev.get("cwd") or os.getcwd()
 
+    repo = ""
     if tool in FILE_TOOLS:
         paths = [inp.get(FILE_TOOLS[tool]) or ""]
     elif tool == "Bash":
         paths = bash_targets(inp.get("command") or "")
+        repo = tree_git_repo(inp.get("command") or "", cwd)
     else:
         return
     paths = [norm(p, cwd) for p in paths if p]
-    if not paths:
+    if not paths and not repo:
         return
+
+    if repo:
+        who = me()
+        for key, owner, globs in guarded_locks():
+            base = next((b for b in (os.path.realpath(glob_base(g)) for g in globs)
+                         if b == repo or b.startswith(repo + "/")), "")
+            if owner != who and base:
+                deny(f"This git command acts on the whole tree of {repo}, and session '{owner}' "
+                     f"holds files in it (slog lock '{key}'). It would sweep their half-finished work "
+                     "into your change. Name your files instead (`git add -- <path>`, "
+                     "`git commit -- <path>`), or wait for them to `slog free`.")
+                return
 
     board = os.path.normpath(BOARD)
     for p in paths:
