@@ -43,6 +43,8 @@ else no "python3"; MISSING=1; fi
 command -v claude >/dev/null && ok "claude (Claude Code)" || info "claude not on PATH — tiles will fall back to a shell until it is"
 command -v magick >/dev/null || command -v convert >/dev/null && ok "ImageMagick (image optimization)" || info "optional: ImageMagick, to shrink uploaded images for tokens"
 command -v pdftotext >/dev/null && ok "pdftotext (PDF → text)" || info "optional: poppler-utils, to extract text from uploaded PDFs"
+command -v dot >/dev/null && ok "Graphviz (diagrams in the Chat view)" || info "recommended: graphviz, to draw \`\`\`dot blocks as diagrams in the Chat view"
+[ -f "${CR_KATEX_DIR:-/usr/share/javascript/katex}/katex.min.js" ] && ok "KaTeX (formulas in the Chat view)" || info "recommended: libjs-katex (or CR_KATEX_DIR), to render \$…\$ formulas in the Chat view"
 command -v flock >/dev/null && ok "flock (slog locking)" || { no "flock (util-linux) — needed by slog"; MISSING=1; }
 
 echo "2. Configuration"

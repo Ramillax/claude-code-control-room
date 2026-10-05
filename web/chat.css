@@ -105,6 +105,13 @@ main{gap:12px;padding:12px;background:radial-gradient(1200px 600px at 10% -10%,r
 .chat code{font:12px ui-monospace,Menlo,Consolas,monospace;background:rgba(0,0,0,.28);padding:.05em .35em;border-radius:4px}
 .m-a a{color:#e3a27f}
 .m-a blockquote{margin:.3em 0;padding:.1em .8em;border-left:2px solid var(--border);color:var(--muted)}
+.m-a .katex{font-size:1.1em}
+.m-a .katex-display{margin:.5em 0;overflow-x:auto;overflow-y:hidden;padding:.15em 0}   /* a wide formula scrolls on the phone */
+.m-a .dotfig{margin:.5em 0}
+.m-a .dotfig>a{display:block;padding:4px 0;text-align:center;overflow-x:auto}
+.m-a .dotfig img{max-width:100%;height:auto;vertical-align:middle}
+.m-a .dotfig summary{cursor:pointer;color:var(--muted);font-size:11.5px;margin-top:.2em}
+.m-a .dotfig.broken>a,.m-a .dotfig.broken details>summary{display:none}
 .cb{margin:.4em 0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .cb-h{display:flex;justify-content:space-between;padding:2px 9px;font-size:11px;color:var(--muted);background:rgba(0,0,0,.25)}
 .cb-h button{all:unset;cursor:pointer;font-size:11px}.cb-h button:hover{color:var(--fg)}

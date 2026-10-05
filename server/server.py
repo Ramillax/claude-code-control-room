@@ -14,6 +14,8 @@ terminal iframes (on-screen keys, touch scrolling, clipboard bridge):
   POST /upload    save files, optionally shrink them for tokens, type the path into a session
   POST /rm        delete a file — only inside the uploads/ and outbox/ folders
   POST /stt       dictation: audio -> Whisper -> text typed into a session's prompt (no Enter)
+  /katex/...      KaTeX for formulas in the Chat view, served from a local copy (optional)
+  /dot            a ```dot block of the Chat view rendered to SVG by Graphviz (optional)
 
 !!! SECURITY: this server has NO authentication. Anyone who can reach it gets a shell as
 !!! your user. It binds to 127.0.0.1 by default. Put it behind real auth before exposing it
@@ -70,6 +72,13 @@ IMG_EXTS  = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp",
 MAGICK    = shutil.which("magick") or shutil.which("convert")      # optional
 PDFTOTEXT = shutil.which("pdftotext")                               # optional (poppler-utils)
 PDFINFO   = shutil.which("pdfinfo")
+# Formulas and diagrams in the Chat view (both optional; without them the chat shows the raw text/code).
+# KaTeX is served from a local copy, never a CDN: apt install libjs-katex puts it in the default path.
+KATEX_DIR = os.path.abspath(os.path.expanduser(E("CR_KATEX_DIR") or "/usr/share/javascript/katex"))
+KATEX_EXT = {".js", ".css", ".woff2", ".woff", ".ttf"}
+DOT_ENGINES = {"dot", "neato", "fdp", "circo", "twopi", "osage", "sfdp"}   # apt install graphviz
+DOT_MAX   = 16000
+DOT_CACHE = {}                     # sha1 → svg bytes, or None if it didn't compile; bounded below
 
 # ── Dictation (optional) ───────────────────────────────────────────────────────────────────
 # CR_STT_PROVIDER = openai | azure | (empty = the 🎤 button is hidden)
@@ -646,6 +655,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_download(q); return True
         if route == "/view":
             self.send_view(q); return True
+        if route.startswith("/katex/"):
+            self.send_katex(route[len("/katex/"):]); return True
+        if route == "/dot":
+            self.send_dot(q); return True
         if route == "/api/chat":
             try:
                 off = int((q.get("off") or ["0"])[0])
@@ -1003,6 +1016,65 @@ class Handler(SimpleHTTPRequestHandler):
                 shutil.copyfileobj(fh, self.wfile)
             except (BrokenPipeError, ConnectionResetError):
                 pass
+
+    def _empty(self, code):
+        self.send_response(code); self.send_header("Content-Length", "0"); self.end_headers()
+
+    def send_katex(self, rel):
+        # checked on the requested path, not its realpath: Debian's package links fonts/ to /usr/share/fonts,
+        # so symlinks inside the KaTeX folder are followed, but no ".." ever leaves it
+        path = os.path.normpath(os.path.join(KATEX_DIR, rel))
+        if ".." in rel.split("/") or not path.startswith(KATEX_DIR + os.sep) or os.path.splitext(path)[1] not in KATEX_EXT \
+                or not os.path.isfile(path):
+            return self._empty(404)                    # not installed: the chat keeps formulas as text
+        data = open(path, "rb").read()
+        self.send_response(200)
+        self.send_header("Content-Type", {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf"}.get(
+            os.path.splitext(path)[1]) or mimetypes.guess_type(path)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=86400")
+        self.end_headers()
+        if not self._head:
+            self.wfile.write(data)
+
+    # A ```dot block of the chat is requested as <img src="dot?e=<engine>&g=<DOT in base64url>">: a plain GET
+    # (auth proxies can kill background POSTs) and addressed by content, so it caches. The SVG goes out with a
+    # closed CSP: as an <img> nothing in it runs, and opened in its own tab a URL="javascript:" doesn't either.
+    def send_dot(self, q):
+        import base64
+        g = (q.get("g") or [""])[0]
+        eng = (q.get("e") or ["dot"])[0]
+        svg = None
+        if g and len(g) <= DOT_MAX * 2 and eng in DOT_ENGINES and shutil.which(eng):
+            key = hashlib.sha1((eng + "\0" + g).encode()).hexdigest()
+            if key in DOT_CACHE:
+                svg = DOT_CACHE[key]
+            else:
+                try:
+                    src = base64.urlsafe_b64decode(g + "=" * (-len(g) % 4))
+                    # dark like the chat: transparent background, white text, grey strokes (a color set
+                    # in the DOT itself still wins, these are only defaults)
+                    r = subprocess.run([eng, "-Tsvg", "-Gbgcolor=transparent", "-Gpad=0.15",
+                                        "-Gfontname=DejaVu Sans", "-Nfontname=DejaVu Sans", "-Efontname=DejaVu Sans",
+                                        "-Gfontcolor=#ffffff", "-Nfontcolor=#ffffff", "-Efontcolor=#ffffff",
+                                        "-Gcolor=#7c89a8", "-Ncolor=#aab4cc", "-Ecolor=#aab4cc"],
+                                       input=src[:DOT_MAX], capture_output=True, timeout=10)
+                    svg = r.stdout if r.returncode == 0 and b"<svg" in r.stdout else None
+                except Exception:
+                    svg = None
+                if len(DOT_CACHE) > 200:
+                    DOT_CACHE.clear()
+                DOT_CACHE[key] = svg
+        if svg is None:
+            return self._empty(422)                    # the chat then opens the DOT code instead
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("Content-Length", str(len(svg)))
+        self.send_header("Cache-Control", "private, max-age=86400")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+        self.end_headers()
+        if not self._head:
+            self.wfile.write(svg)
 
     def handle_upload(self):
         msg, err = self._multipart(MAX_BODY)

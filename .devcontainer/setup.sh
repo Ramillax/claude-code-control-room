@@ -4,9 +4,9 @@
 set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "→ dependencies (python3, tmux, ttyd 1.7 from Ubuntu 24.04, poppler for PDF text; the base image has no python3)"
+echo "→ dependencies (python3, tmux, ttyd 1.7 from Ubuntu 24.04, poppler for PDF text, graphviz + KaTeX for the Chat view; the base image has no python3)"
 sudo apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 tmux ttyd poppler-utils >/dev/null
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 tmux ttyd poppler-utils graphviz libjs-katex >/dev/null
 
 echo "→ Claude Code (official native installer → ~/.local/bin/claude)"
 command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash

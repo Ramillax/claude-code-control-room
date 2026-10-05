@@ -26,15 +26,14 @@ Three layers, one idea: **several agents working on the same project without ste
 
 What you get:
 
-- **A chat view on every tile, with the terminal still underneath.** Each session reads like a chat app: markdown, tables, code with a Copy button, and every tool call folded into one line per group with the **real command as a grey hint**, so it stays as dense as a terminal. When Claude asks for permission, a card shows **exactly what it wants to run** (the full command, or the diff for an edit) with one button per option. A message box with paste/drop for any file, large ones included (previewed before sending), Claude's animated working line, "send now" to interrupt with a queued message, and a clear card when a tile has no Claude running. One tap on **Term** and the real terminal is there, never restarted. See [The Chat view](#the-chat-view).
+- **A chat view on every tile, with the terminal still underneath.** Each session reads like a chat app (markdown, tables, formulas, diagrams) with every tool call folded into one line showing the **real command**. A permission request is a card with **exactly what Claude wants to run** and one button per option. Paste or drop any file into the message box; what Claude hands you back shows up as one-tap **Download** and **Copy** cards. One tap on **Term** and the real terminal is there, never restarted. See [The Chat view](#the-chat-view).
 - **Live state per session**: working, idle, or **waiting for your permission**. It comes from Claude Code's own hook events, not from screen-scraping, so it doesn't break when the CLI's UI changes. A red badge in the top bar takes you straight to the session that needs you, and it clears whether you answer yes, no or Esc (no hook fires on a "no", so the server confirms it on screen; see [below](#the-permission-badge-and-the-no-case)).
 - **`slog`, a shared board with hierarchical locks.** Every session can see what the others are doing and claim a resource (`api`) or just part of it (`api:auth`). Each tile shows the locks its session holds. Locks are advisory by default; tie one to files with `--paths` and a hook **enforces** it: other sessions get their edits to those files denied.
 - **Every session starts informed**: a SessionStart hook injects the live locks, the recent feed, the files other sessions just changed, the project's notes (done / next / don't redo) and how to hand you files and clips in the Chat view into each new session, also after `/clear` and compaction. Nobody has to remember to run `slog status`.
 - **History by session**: every file a session writes is committed on its own, labeled with the session and its transcript id, in a shadow git repo that never touches your project's `.git`. `cr-hist changed` answers "what did the other sessions change?", `cr-hist who <file>` leads to the conversation that made a change.
 - **Mode and plan usage at a glance**: each tile shows Claude Code's permission mode (auto / accept edits / plan / manual; **tap it to switch**, like Shift+Tab) and how much context the conversation uses. The top bar shows your plan's **5-hour session and weekly usage** with their reset times, read from a silent status line.
-- **Built for the phone**: the Chat view is plain web text, so you select and scroll with your finger; in Term, an on-screen key bar (Esc, arrows, Tab, Ctrl-C), swipe to scroll history, tap-to-jump between sessions. The header fits one row.
-- **Files both ways**: paste a screenshot with **Ctrl-V**, drop files, or use 📎; images and PDFs show as thumbnails in the chat and open large in an **in-page viewer**, including the ones Claude reads or links with `![](path)`. When Claude hands you a file, it shows up **in the chat as a Download card** (name, size, one tap), as long as the path it wrote exists inside `CR_FILE_ROOTS`; the download dialog still opens on the outbox where agents drop things for you.
-- **📋 One-tap clip**: ask the agent to put something in the clip (a command, a URL, a draft) and it writes it with `cr-clip`; you copy it with one tap, from the top bar or from the **Copy card** that appears in the chat right where the agent loaded it, next to any file it handed you. The clip is one for every session, so the **⌄** next to 📋 keeps the last four: if another session overwrote yours, it's one tap away. In Chat you can also just select text with your finger; the clip is for exact text you'd rather not select by hand (a long command, a token), and it's still the way to copy from Term on a phone.
+- **Built for the phone**: the Chat view is plain web text, so you select and scroll with your finger; in Term, an on-screen key bar (Esc, arrows, Tab, Ctrl-C), swipe to scroll history, tap-to-jump between sessions. See [On the phone](#on-the-phone).
+- **📋 One-tap clip**: the agent puts exact text (a command, a token, a draft) in the clip with `cr-clip` and you copy it with one tap. The **⌄** next to 📋 keeps the last four, since every session shares one clip.
 - **🎤 Dictation (optional)**: speech → Whisper → typed into the prompt *without* pressing Enter, with a hallucination filter based on Whisper's per-segment metrics.
 - **Skills that survive the session**: a 3-layer structure (router / current state / decision log), a `skill-sync` skill that consolidates each session's findings before it closes, and `skill-lint` to catch what parallel sessions break (duplicate changelog ids, dead pointers, bloated routers).
 
@@ -60,9 +59,7 @@ No frameworks, no build step, no `npm install`: Python standard library, bash, a
 
 ## Try it in one click
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1)
-
-GitHub builds a container with tmux, ttyd and Claude Code, starts the panel and opens it in your browser. Log in to Claude Code in the first tile and you're running. The forwarded port is **private**: only your GitHub account can open it, so you get authentication for free. The free Codespaces quota covers dozens of hours a month.
+The **Try it** button above opens it in GitHub Codespaces: GitHub builds a container with tmux, ttyd and Claude Code, starts the panel and opens it in your browser. The forwarded port is **private**, so you get authentication for free, and the free quota covers dozens of hours a month.
 
 Open it in a **browser tab** (🌐 in the **Ports** tab): VS Code's built-in preview can't show it, because the panel refuses to be embedded in other pages (that's what keeps other sites from framing your terminal).
 
@@ -79,6 +76,7 @@ Tested on Ubuntu 24.04. Any recent Linux works; macOS is not supported (the scri
 sudo apt update
 sudo apt install -y tmux python3 git
 sudo apt install -y imagemagick poppler-utils     # optional: shrink uploaded images, extract PDF text
+sudo apt install -y graphviz libjs-katex          # recommended: diagrams and formulas in the Chat view
 
 # 2. Install ttyd (version 1.7 or newer)
 sudo apt install -y ttyd                          # Ubuntu 24.04+ / Debian 12+ ship 1.7.x
@@ -282,13 +280,20 @@ Every tile has a **Chat / Term** switch (remembered per tile). Chat is a layer *
 
 - **Where the conversation comes from.** Claude Code writes each session's transcript to `~/.claude/projects/<project>/<id>.jsonl`. The state hook records that path on every event, and so does the silent status line (`hooks/cr-statusline.py`); the server reads the newest one, so the view follows `/clear`, `/resume` and compaction by itself. Reads are incremental (by byte offset) and only the tail is loaded at first. Without the hooks there is no Chat view for that tile; Term always works.
 - **Permission card.** Claude Code writes the tool call to the transcript *before* it asks, so the card shows the pending step (the whole command, or the diff) and marks it "waiting for your OK"; if it isn't there yet, it shows the box as it is on screen. Options that the terminal UI wraps across lines are joined back. The buttons send the option's key to the session (a whitelist: digits, Esc, Enter, Shift+Tab).
-- **What Claude hands you.** A file path in Claude's reply that exists inside `CR_FILE_ROOTS` becomes a **⬇ Download** card (name, size, one tap). Text Claude loads with `cr-clip` becomes a **📋 Copy** card at the point where it was loaded; its text comes from the command itself, so another session overwriting the clip later doesn't change it. Downloads and clips from the same turn sit in one row. Images and PDFs render inline: `![](path)` in a reply, and any image or PDF Claude reads. The context hook tells every session how to hand you things this way (`CR_CHAT_TIPS=0` turns that off).
+- **What Claude hands you.** A file path in Claude's reply that exists inside `CR_FILE_ROOTS` becomes a **⬇ Download** card (name, size, one tap). Text Claude loads with `cr-clip` becomes a **📋 Copy** card at the point where it was loaded; its text comes from the command itself, so another session overwriting the clip later doesn't change it. Downloads and clips from the same turn sit in one row. A PDF path gets a Download card too, so you can save it from the phone. Images and PDFs render inline: `![](path)` in a reply, and any image or PDF Claude reads. The context hook tells every session how to hand you things this way (`CR_CHAT_TIPS=0` turns that off).
 - **Attachments and the viewer.** Paste with Ctrl-V, drop, or use 📎: any file waits in a preview strip above the box (✕ removes one) until you send. In the conversation images and PDFs are thumbnails; a tap opens them in an in-page viewer, with "open in a tab". Esc closes the viewer without interrupting Claude. Any other file (a zip, a spreadsheet) is a card with its extension that downloads it.
 - **Large attachments.** Over 90 MB in total, the browser uploads each file in 40 MB pieces, one at a time, because proxies cap a request body (Cloudflare at 100 MB) and fail it silently. Every piece carries its SHA-256: the server refuses a piece that doesn't match (the browser retries it), checks the total size at the end, and only then hands Claude the path. A failed send shows up in the chat with the reason instead of disappearing.
 - **Writing.** The message box pastes your text with bracketed paste (line breaks don't submit it halfway) and presses Enter. Attachments are saved to `uploads/` and Claude gets their paths after your text. Sending uses a navigational form into a hidden frame, never XHR, like the uploads (auth proxies can kill background POSTs). It is exactly as powerful as typing in the terminal: same auth, same sessions (`CR_SESSIONS`).
 - **Working line.** While Claude works, the chat shows its own animated line (`✻ Refactoring… (1m 12s · ↓ 6.8k tokens)`), read from the screen.
 - **Send now.** A message you send while Claude works is queued (gray). "send now" interrupts (Esc) and then presses Enter, which sends it if Claude put it back in the prompt; if Claude had already sent it, the Enter lands on an empty prompt and does nothing.
 - **No Claude in the tile.** If the tile is at the shell (Claude exited) or running another program (ssh, vim…), the chat says so, offers **Start Claude** / **Continue the last conversation** / **Go to Term**, and locks the message box, since anything typed there would go to that program.
+- **Formulas and diagrams (optional, recommended).** LaTeX in a reply renders as math: `$…$` inline, `$$…$$` as a block (also `\(…\)` and `\[…\]`); prices like `$1M to $2M` stay text. A ```` ```dot ```` block (or `neato`, `fdp`, `circo`, `twopi`) is drawn as a diagram, with its code folded underneath. Both run on your server, no CDN. Without them the chat shows the raw text and the code block. Quick setup:
+
+  ```bash
+  sudo apt install -y graphviz libjs-katex    # then reload the page; no restart, no config
+  ```
+
+  Other distros: Graphviz from your package manager, and KaTeX's release unpacked anywhere (the folder with `katex.min.js`, `katex.min.css` and `fonts/`) with `CR_KATEX_DIR` pointing at it. `install.sh` reports which ones it found, and the context hook tells sessions to use them only when they're there.
 - **Known limit.** The transcript is written per message, not per token, so a reply appears whole when each block finishes. Token-by-token streaming is in Term.
 
 ## Skills: knowledge that survives the session
@@ -358,7 +363,7 @@ Optional: `CR_STT_LANGUAGE=en` and `CR_STT_PROMPT="Postgres, Kubernetes, YourPro
 
 ## On the phone
 
-- In Chat, the message box is the keyboard and the key bar shrinks to one compact row: the tile switcher, esc and ^C to stop Claude, 🎤, and arrows + ⏎ to move through Claude's menus (they go straight to tmux). The top bar keeps ⬇ download and 📋 clip with its ⌄ history; each tile shows its mode, context % and reload / clear / full screen. In Term, the full key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
+- In Chat, the key bar shrinks to one row: tile switcher, esc and ^C to stop Claude, 🎤, and arrows + ⏎ for Claude's menus. In Term, the full key bar sends keys to the **active** tile (the most visible one). `clr` = Ctrl-U (clears Claude's prompt). **`^Z` suspends to the shell, it is not undo**; `fg` brings Claude back. Destructive keys need a double tap.
 - **Switching mode**: tap the mode pill on the tile (auto / plan / …); it sends Shift+Tab, handy when auto mode can't run and you need a session to ask you instead.
 - **Copying**: in Chat, select the text with your finger like on any web page. In Term, ask the agent to put it in the clip (`cr-clip`), then tap 📋: selecting text inside a terminal is unreliable on touch screens. On desktop, a mouse selection does work: scroll up one notch (tmux copy-mode freezes the screen), drag and release, and it reaches your clipboard via OSC 52.
 - If the 🎤 fails with `NotAllowedError` while the site permission is granted, the block is at the OS level, or it's a `Permissions-Policy` header from your proxy, which must allow `microphone=(self)`.
@@ -405,12 +410,13 @@ examples/                  CLAUDE.md snippet, hooks JSON, tmux.conf, systemd uni
                                    │               ◄─ slog locks + feed   ◄── SESSIONS.md ◄── slog (from any session)
                                    ├─ /upload /files /dl /rm   (.controlroom/uploads, outbox)
                                    ├─ /clip.txt   ◄── cr-clip
+                                   ├─ /api/chat   ◄── transcripts (~/.claude/projects) · /dot ──► Graphviz (optional)
                                    └─ /stt ──► Whisper (optional) ──► tmux send-keys (no Enter)
 ```
 
 Everything is served from **one origin**. That's what lets the page reach into the terminal iframes (the key bar, touch scrolling, the clipboard bridge).
 
-Uploads and dictation use a normal `<form>` POST into an iframe, never `fetch()`. Some auth proxies answer background requests with an interactive challenge page, which silently breaks them, while a form submission is a navigation and goes through. Keep that pattern if you extend it.
+Uploads, chat messages and dictation use a normal `<form>` POST into an iframe, never `fetch()`: some auth proxies answer background requests with a challenge page, which silently breaks them. Keep that pattern if you extend it.
 
 ## Configuration
 
@@ -425,6 +431,7 @@ All settings live in `controlroom.env` (see `controlroom.env.example`, where eve
 | `CR_BIND` / `CR_PORT` | `127.0.0.1` / `7680` | keep it on localhost |
 | `CR_FILE_ROOTS` | workdir + `.controlroom` | what the download dialog may browse |
 | `CR_STT_PROVIDER` | *(off)* | `azure` or `openai` |
+| `CR_KATEX_DIR` | `/usr/share/javascript/katex` | local KaTeX for formulas in the Chat view (optional) |
 
 ## Known limitations
 

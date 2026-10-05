@@ -19,7 +19,34 @@ function mdInline(t){
        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   return t.replace(/\u0000(\d+)\u0000/g, (_,i)=>"<code>"+codes[+i]+"</code>");
 }
+// Formulas (optional: only if KaTeX is installed, see server.py /katex): $$…$$ and \[…\] as a block, $…$
+// and \(…\) inline. They're taken out BEFORE the markdown (or the `*` and `_` of the LaTeX turn into italics)
+// and left as a \u0001N\u0001 marker, skipping ``` blocks and `code`. The inline $ follows Pandoc's rule so
+// prices survive: no space right after the opening $ or before the closing one, and the closing one is not
+// followed by a digit ("$1M to $2M", "US$100" and "$500k–$800k" stay text). If KaTeX isn't there or the
+// formula doesn't compile, the raw text stays.
+const MATH_RE = /`[^`\n]+`|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\$\w])\$(?=[^\s$])((?:\\.|[^$\\\n])+?)(?<=[^\s\\])\$(?![\d$])/g;
 function md(src){
+  const math = [], segs = []; let fence = false, buf = [];
+  const flush = () => { if(buf.length) segs.push(buf.join("\n").replace(MATH_RE, (m, d1, d2, i1, i2) => {
+    if(m[0] === "`" || typeof katex === "undefined") return m;
+    const tex = d1 ?? d2 ?? i1 ?? i2, display = d1 != null || d2 != null;
+    try{ math.push(katex.renderToString(tex.trim(), {displayMode: display, throwOnError: true, output: "html"})); }
+    catch(e){ return m; }
+    return "\u0001" + (math.length-1) + "\u0001";
+  })); buf = []; };
+  for(const l of String(src).split("\n")){
+    if(/^\s*```/.test(l)){ if(!fence) flush(); fence = !fence; segs.push(l); continue; }
+    if(fence) segs.push(l); else buf.push(l);
+  }
+  flush();
+  const html = mdBlocks(segs.join("\n"));
+  return math.length ? html.replace(/\u0001(\d+)\u0001/g, (_, n) => math[+n]) : html;
+}
+const b64u = s => { let b = ""; for(const c of new TextEncoder().encode(s)) b += String.fromCharCode(c);
+  return btoa(b).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); };
+const DOT_LANGS = {dot:"dot", graphviz:"dot", gv:"dot", neato:"neato", fdp:"fdp", circo:"circo", twopi:"twopi"};
+function mdBlocks(src){
   const L = src.split("\n"), out = []; let i = 0;
   const isList = l => /^\s*([-*]|\d+\.)\s+/.test(l);
   while(i < L.length){
@@ -28,7 +55,16 @@ function md(src){
       const lang = l.trim().slice(3).trim(), buf = []; i++;
       while(i < L.length && !/^\s*```/.test(L[i])) buf.push(L[i++]);
       i++;
-      out.push(`<div class="cb"><div class="cb-h">${esc(lang||"text")}<button data-copy>Copy</button></div><pre>${esc(buf.join("\n"))}</pre></div>`);
+      const code = `<div class="cb"><div class="cb-h">${esc(lang||"text")}<button data-copy>Copy</button></div><pre>${esc(buf.join("\n"))}</pre></div>`;
+      // ```dot / ```graphviz (or the engine: ```neato, ```fdp…) → a diagram the server renders (optional:
+      // needs Graphviz). The code stays folded underneath; if it doesn't render, the image goes and the code opens.
+      const eng = DOT_LANGS[lang.toLowerCase()], g = eng && b64u(buf.join("\n"));
+      if(g && g.length <= 30000){
+        const u = `dot?v=1&e=${eng}&g=${g}`;
+        out.push(`<figure class="dotfig"><a href="${u}" target="_blank" rel="noopener"><img alt="diagram" src="${u}" onerror="const f=this.closest('figure');f.classList.add('broken');f.querySelector('details').open=true"></a><details><summary>DOT</summary>${code}</details></figure>`);
+        continue;
+      }
+      out.push(code);
       continue;
     }
     if(/^\s*\|/.test(l) && i+1 < L.length && /^\s*\|[\s:|-]+\|\s*$/.test(L[i+1])){
@@ -58,7 +94,7 @@ function md(src){
     }
     if(l.startsWith(">")){
       const buf = []; while(i < L.length && L[i].startsWith(">")) buf.push(L[i++].replace(/^>\s?/,""));
-      out.push(`<blockquote>${md(buf.join("\n"))}</blockquote>`); continue;
+      out.push(`<blockquote>${mdBlocks(buf.join("\n"))}</blockquote>`); continue;
     }
     if(!l.trim()){ i++; continue; }
     const buf = [];
@@ -280,7 +316,12 @@ function renderSetup(c, scr, key){
 function renderDraft(c, text){
   let dr = c.tile.querySelector(".cdraft");
   c.msgs.querySelectorAll(".m-u.back").forEach(x=> x.classList.remove("back"));
-  if(!text){ if(dr) dr.remove(); return; }
+  if(!text){ c.tile.dataset.drseen = ""; if(dr) dr.remove(); return; }
+  // Only if the SAME text stays in the box ≥3 s: when you send from the chat, the paste sits there for an
+  // instant before the Enter, and the "not sent" box flashed on every message.
+  const [seenTxt, seenAt] = JSON.parse(c.tile.dataset.drseen || '["",0]');
+  if(seenTxt !== text){ c.tile.dataset.drseen = JSON.stringify([text, Date.now()]); if(dr) dr.remove(); return; }
+  if(!dr && Date.now() - seenAt < 3000) return;
   const last = [...c.msgs.querySelectorAll(".m-u:not(.pend)")].pop();
   if(last && last.textContent.trim() === text.trim()) last.classList.add("back");
   if(!dr){ dr = document.createElement("div"); dr.className = "cdraft"; c.tile.querySelector(".ccwrap").before(dr); }

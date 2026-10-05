@@ -325,10 +325,56 @@ img = os.path.join(up, "120000_photo.jpg"); open(img, "w").close()
 sent = []
 chat.draft = lambda s, *a: " " + img + " "            # the upload dialog typed this, no Enter
 chat.clear_draft = lambda s: True
-chat._run = lambda cmd, inp=None, **k: (sent.append(inp) if inp else None) or type("R", (), {"returncode": 0})()
+chat._run = lambda cmd, inp=None, **k: (sent.append(inp) if inp else None) or type("R", (), {"returncode": 0, "stdout": ""})()
 chat.send("s", ["s"], text="look at this")
 print("kept" if sent and img in sent[0] and sent[0].startswith("look at this") else "lost " + repr(sent))
 EOF
 check "an uploaded path left in the input box joins the chat message" 'grep -qx kept "$T/keep.out"'
+
+echo "chat: leaving tmux copy mode before sending, and PDF paths get a Download card"
+python3 - "$HERE/server" "$T" > "$T/send2.out" <<'EOF'
+import os, sys
+sys.path.insert(0, sys.argv[1]); import chat
+calls = []
+def run(cmd, inp=None, **k):
+    calls.append(cmd)
+    return type("R", (), {"returncode": 0, "stdout": "1\n" if "#{pane_in_mode}" in cmd else ""})()
+chat._run = run; chat.draft = lambda s, *a: ""
+chat.send("s", ["s"], text="hi")
+i = next((n for n, c in enumerate(calls) if "copy-mode" in c), None); j = next((n for n, c in enumerate(calls) if "paste-buffer" in c), None)
+print("copymode", i is not None and j is not None and i < j)
+t = sys.argv[2]; open(os.path.join(t, "manual.pdf"), "w").write("x"); open(os.path.join(t, "shot.png"), "w").write("x")
+chat.DL_ROOTS[:] = [os.path.realpath(t)]
+print("pdfcard", ",".join(f["n"] for f in chat.files_in(f"{t}/manual.pdf and {t}/shot.png")))
+EOF
+check "a message from Chat first leaves copy mode (scrolled-up Term ate it)" 'grep -qx "copymode True" "$T/send2.out"'
+check "a PDF path gets a Download card, an image doesn't"                   'grep -qx "pdfcard manual.pdf" "$T/send2.out"'
+
+echo "chat: formulas and diagrams (optional)"
+if command -v node >/dev/null; then
+  python3 - "$HERE/web/chat.js" > "$T/md.js" <<'EOF'
+import sys
+s = open(sys.argv[1]).read(); i = s.index("function mdInline(t){"); j = s.index("// ── Attachments")
+print('const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c])); const attHTML = p => "";')
+print(s[i:j])
+print(r"""
+let bad = 0; const t = (name, ok) => { if(!ok){ bad++; console.error("md case failed:", name); } };
+t("without KaTeX a formula stays text", md("energy $E=mc^2$ here").includes("$E=mc^2$"));
+globalThis.katex = {renderToString: (tex, o) => { if(tex.includes("\\bad")) throw new Error("x"); return `<K${o.displayMode ? " d" : ""}>${tex}</K>`; }};
+t("inline formula renders", md("energy $E=mc^2$ here").includes("<K>E=mc^2</K>"));
+t("block formula renders", md("$$\\frac{a}{b}$$").includes("<K d>\\frac{a}{b}</K>"));
+t("prices stay text", !md("from $1M to $2M, US$100, $500k–$800k").includes("<K"));
+t("a formula that doesn't compile stays text", md("$\\bad x$").includes("$\\bad x$"));
+t("no formulas inside code", !md("`$a$`\n```\n$b$\n```").includes("<K"));
+t("* inside a formula is not italics", md("$a*b*c$").includes("<K>a*b*c</K>"));
+const d = md("```dot\ndigraph{a->b}\n```");
+t("a dot block becomes a diagram with its code folded", d.includes('class="dotfig"') && d.includes("dot?v=1&e=dot&g=") && d.includes("<details>"));
+t("a plain code block stays code", !md("```js\nx\n```").includes("dotfig"));
+process.exit(bad);""")
+EOF
+  check "math: rendered with KaTeX, raw without it, prices and code untouched; dot → diagram" 'node "$T/md.js"'
+else
+  echo "  (node not installed: skipped)"
+fi
 
 [ $FAIL = 0 ] && echo "all tests passed" || { echo "SOME TESTS FAILED"; exit 1; }

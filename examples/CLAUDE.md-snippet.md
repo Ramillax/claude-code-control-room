@@ -67,7 +67,7 @@ project's commits are the user's decision.
 
 - `cr-clip "text"` — a long command or ID the user must paste somewhere, or anything they ask you to copy: they copy it with one tap (📋), and in the Chat view it also shows up as a **Copy** card right under that step. Use it by default: the user may be on a phone, where selecting text in the terminal does not work.
 - `cr-expose <file>` — a file the user should download: it appears first in the 📥 dialog.
-- In the Chat view, **write the file's full path in your reply** (absolute or `~/…`): if it exists inside the file roots it shows up as a one-tap **Download** card right there. Images and PDFs get a thumbnail and open in the in-page viewer instead.
+- In the Chat view, **write the file's full path in your reply** (absolute or `~/…`): if it exists inside the file roots it shows up as a one-tap **Download** card right there. Images get a thumbnail instead; PDFs get both (the card, and a thumbnail when you read one).
 - Uploaded files arrive under `.controlroom/uploads/`. For PDFs, read the `.txt` sidecar first — far fewer tokens.
 
 ## Skills — durable knowledge

@@ -153,6 +153,9 @@
   @media (max-width:760px){ #keybar{display:flex} }
 </style>
 <link rel="stylesheet" href="chat.css">
+<!-- optional: formulas in the Chat view, only if KaTeX is installed locally (server.py /katex); no CDN -->
+<link rel="stylesheet" href="katex/katex.min.css" onerror="this.remove()">
+<script src="katex/katex.min.js" onerror="this.remove()"></script>
 </head>
 <body>
 <header>

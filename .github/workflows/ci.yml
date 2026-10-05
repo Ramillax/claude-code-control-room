@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux ttyd
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux ttyd graphviz libjs-katex
       - name: install.sh
         run: bash install.sh --workdir "$PWD"
       - name: start the panel and hit it
@@ -47,6 +47,14 @@ jobs:
           curl -fsS -o chat.css.out http://127.0.0.1:7680/chat.css && grep -q 'cperm' chat.css.out
           curl -fsS "http://127.0.0.1:7680/api/chat?s=shell" | python3 -c 'import json,sys; json.load(sys.stdin)'
           curl -fsS http://127.0.0.1:7680/api/usage | python3 -c 'import json,sys; json.load(sys.stdin)'
+          # formulas and diagrams (optional deps, installed above): served locally, nothing outside the KaTeX dir
+          curl -fsS -o /dev/null http://127.0.0.1:7680/katex/katex.min.js
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7680/katex/..%2F..%2F..%2F..%2Fetc%2Fpasswd")
+          [ "$code" = 404 ] || { echo "/katex served a path outside its folder"; exit 1; }
+          g=$(printf 'digraph{a->b}' | base64 -w0 | tr '+/' '-_' | tr -d '=')
+          curl -fsS "http://127.0.0.1:7680/dot?e=dot&g=$g" | grep -q '<svg'
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:7680/dot?e=dot&g=bm90IGRvdA")
+          [ "$code" = 422 ] || { echo "/dot accepted something that isn't DOT"; exit 1; }
           # a large attachment in pieces: a damaged piece is refused, the good ones reassemble byte for byte
           head -c 3000000 /dev/urandom > big.bin; split -b 1000000 -d big.bin pz.
           bad=$(curl -s -F "f=@pz.00;filename=big.zip" -F up=smoke0bad -F ui=0 -F un=3 -F sha="$(printf '0%.0s' $(seq 64))" -F sz=3000000 -F s=shell http://127.0.0.1:7680/chat/send)

@@ -28,7 +28,9 @@ TMUX = ["tmux"]
 STATE_DIR = ""
 DL_ROOTS = []                  # = server.ALLOWED_ROOTS: a file Claude mentions gets a Download card only inside them
 FILE_RE = re.compile(r"((?:~|(?<![\w.~]))/(?:[\w.@+-]+/)+[\w.@+-]+\.[A-Za-z0-9]{1,8})\b")   # absolute or ~/
-PREVIEW_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}   # these get a thumbnail / viewer instead
+PREVIEW_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}   # these get a thumbnail instead
+# (a PDF is NOT here: the PDF viewer only shows for attachments, a Read or ![](path), so a PDF path in
+# Claude's text had no card at all and there was no way to download it from the phone)
 
 
 def init(tmux, state_dir, dl_roots=()):
@@ -389,6 +391,11 @@ def send(sess, allowed, text=None, key=None, choose=None, clear=False):
     if sess not in allowed:
         return False
     tgt = f"={sess}:"
+    # If you scrolled up in Term, tmux is in copy mode and eats whatever we send (the paste, the Enter,
+    # the keys): the message sat there unsent until you scrolled back down or hit Esc. Leave it first.
+    r = _run(TMUX + ["display-message", "-p", "-t", tgt, "#{pane_in_mode}"])
+    if r and r.returncode == 0 and r.stdout.strip() == "1":
+        _run(TMUX + ["copy-mode", "-q", "-t", tgt])
     if choose:
         return pick(sess, allowed, choose)
     if clear:

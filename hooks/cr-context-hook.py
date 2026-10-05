@@ -21,7 +21,7 @@ being enforced).
 
 Fails open and silent: any error → no context added, nothing released, exit 0.
 """
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(os.path.dirname(HERE), "bin")
@@ -157,7 +157,11 @@ def session_start(ev):
             "- A file to download: write its FULL path (absolute or ~/) in your reply → a one-tap Download card. "
             "Only if it exists inside CR_FILE_ROOTS; `cr-expose <file>` puts it in the outbox first.\n"
             "- An image or a PDF: its full path (or `![](path)`) → a thumbnail / PDF card that opens in an in-page viewer.\n"
-            "- Text to copy (a command, a block, a draft): `cr-clip` → a Copy card right under that step, next to any file card.")
+            "- Text to copy (a command, a block, a draft): `cr-clip` → a Copy card right under that step, next to any file card."
+            + ("\n- Formulas: LaTeX with $…$ inline and $$…$$ as a block (also \\(…\\) and \\[…\\]) → rendered math. A price like $1M stays text."
+               if os.path.isfile(os.path.join(os.environ.get("CR_KATEX_DIR") or "/usr/share/javascript/katex", "katex.min.js")) else "")
+            + ("\n- Diagrams: a ```dot block (or ```neato / ```fdp) with Graphviz code → drawn in the chat, code folded underneath."
+               if shutil.which("dot") else ""))
     if not parts:
         return
     head = (f"[control room] You are tmux session '{me}'. " if me else "[control room] ") + \
