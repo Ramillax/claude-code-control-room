@@ -1,12 +1,12 @@
 <p align="center"><img src="docs/banner.svg" alt="Claude Code Control Room: parallel Claude Code sessions, live state and locks, in one screen" width="100%"></p>
 
-[![CI](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/Ramillax/claude-code-control-room/actions/workflows/ci.yml)
+[![CI](https://github.com/ramiro-soler/claude-code-control-room/actions/workflows/ci.yml/badge.svg)](https://github.com/ramiro-soler/claude-code-control-room/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Run several Claude Code sessions in parallel from any browser, phone included, and see at a glance which one is working, which one is waiting for your permission, and who is touching what.**
 
 <p align="center">
-  <a href="https://codespaces.new/Ramillax/claude-code-control-room?quickstart=1"><img src="docs/cta-try.svg" width="440" alt="Try it in your browser: GitHub Codespaces, free quota, ready in about a minute"></a>&nbsp;&nbsp;<a href="#quick-start"><img src="docs/cta-install.svg" width="320" alt="Install on your server: Quick start"></a>
+  <a href="https://codespaces.new/ramiro-soler/claude-code-control-room?quickstart=1"><img src="docs/cta-try.svg" width="440" alt="Try it in your browser: GitHub Codespaces, free quota, ready in about a minute"></a>&nbsp;&nbsp;<a href="#quick-start"><img src="docs/cta-install.svg" width="320" alt="Install on your server: Quick start"></a>
 </p>
 <p align="center"><sub>The Codespace's port is private: only your GitHub account can open it. Log in to Claude Code in the first tile and you're running.</sub></p>
 
@@ -88,7 +88,7 @@ ttyd --version                                    # older distros ship 1.6.x: us
 #    https://docs.claude.com/en/docs/claude-code/setup
 
 # 4. Clone
-git clone https://github.com/Ramillax/claude-code-control-room.git
+git clone https://github.com/ramiro-soler/claude-code-control-room.git
 cd claude-code-control-room
 
 # 5. Install (checks everything, writes the config, adds the hook, the skill and the tmux settings)

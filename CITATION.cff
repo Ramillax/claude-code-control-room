@@ -7,6 +7,6 @@ authors:
   - given-names: Ramiro
     family-names: Soler
 license: MIT
-repository-code: "https://github.com/Ramillax/claude-code-control-room"
+repository-code: "https://github.com/ramiro-soler/claude-code-control-room"
 version: "1.4.0"
 date-released: "2026-10-05"
